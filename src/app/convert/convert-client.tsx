@@ -44,6 +44,7 @@ export function ConvertClient() {
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [paddleProgress, setPaddleProgress] = useState<StatusResponse["progress"]>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
+  const [jobToken, setJobToken] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
 
   async function logout() {
@@ -58,6 +59,7 @@ export function ConvertClient() {
     setPageCount(null);
     setPaddleProgress(null);
     setDownloadUrl("");
+    setJobToken("");
     setWarnings([]);
     setStage("idle");
 
@@ -144,6 +146,7 @@ export function ConvertClient() {
 
       const submitted = (await submitResponse.json()) as SubmitResponse;
       setPageCount(submitted.pageCount);
+      setJobToken(submitted.jobToken);
       sessionStorage.setItem("active-job-token", submitted.jobToken);
       await pollStatus(submitted.jobToken);
     } catch {
@@ -209,6 +212,31 @@ export function ConvertClient() {
     setDownloadUrl(body.downloadUrl);
     setWarnings(body.warnings);
     setStage("ready");
+  }
+
+  async function deleteNow() {
+    const token = jobToken || sessionStorage.getItem("active-job-token");
+    if (!token) {
+      return;
+    }
+
+    await fetch("/api/jobs/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobToken: token })
+    });
+    sessionStorage.removeItem("active-job-token");
+    setDownloadUrl("");
+    setJobToken("");
+    setStage("idle");
+    setUploadedBlob(null);
+    setFile(null);
+  }
+
+  function scheduleCleanupAfterDownload() {
+    setTimeout(() => {
+      void deleteNow();
+    }, 10_000);
   }
 
   return (
@@ -335,9 +363,14 @@ export function ConvertClient() {
                   : "Convert to EPUB"}
         </button>
         {downloadUrl ? (
-          <a className="button" href={downloadUrl} download>
+          <a className="button" href={downloadUrl} download onClick={scheduleCleanupAfterDownload}>
             Download EPUB
           </a>
+        ) : null}
+        {downloadUrl ? (
+          <button className="button danger" type="button" onClick={() => void deleteNow()}>
+            Delete now
+          </button>
         ) : null}
         <button
           className="button secondary"

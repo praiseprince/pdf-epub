@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { deleteJobBlobs } from "@/lib/blob/cleanup";
 import { resultEpubPath } from "@/lib/blob/paths";
 import { createSignedGetUrl } from "@/lib/blob/signed-url";
 import { buildEpubFromPaddleResult } from "@/lib/epub/build";
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       cacheControlMaxAge: 60 * 60
     });
     const downloadUrl = await createSignedGetUrl(outputPath, 60 * 60 * 1000);
+    await deleteJobBlobs(jobClaims.jobId, false).catch(() => undefined);
 
     return NextResponse.json({
       downloadUrl,
@@ -69,4 +71,3 @@ export async function POST(request: Request) {
     return jsonError("EPUB generation failed.", 500);
   }
 }
-
