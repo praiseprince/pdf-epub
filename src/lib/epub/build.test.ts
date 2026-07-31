@@ -51,5 +51,29 @@ describe("EPUB builder", () => {
     expect(chapter).toContain("<table>");
     expect(chapter).toContain('epub:type="footnotes"');
   });
-});
 
+  it("keeps raw LaTeX visible when formula SVG rendering fails", async () => {
+    const epub = await buildEpubFromPaddleResult(
+      {
+        jobId: "job-2",
+        pages: [
+          {
+            markdownText: "Broken math $\\frac{$ should not remove the surrounding paragraph.",
+            markdownImages: {},
+            outputImages: {}
+          }
+        ]
+      },
+      {
+        title: "Broken Formula",
+        originalFilename: "broken.pdf"
+      }
+    );
+
+    const entries = unzipSync(epub.buffer);
+    const chapter = strFromU8(entries["EPUB/text/chapter-1.xhtml"]!);
+    expect(chapter).toContain("math-fallback");
+    expect(chapter).toContain("\\frac{");
+    expect(chapter).toContain("should not remove");
+  });
+});

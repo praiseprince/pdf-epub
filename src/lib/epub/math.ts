@@ -36,10 +36,9 @@ export function renderFormulaSvg(latex: string, display: boolean) {
   });
   const outer = adaptor.outerHTML(node);
 
-  if (!outer.includes("<svg")) {
+  if (!outer.includes("<svg") || outer.includes("mjx-merror") || outer.includes("data-mjx-error")) {
     throw new Error("Formula SVG rendering failed.");
   }
 
   return outer.replace(/<mjx-container[^>]*>/, "").replace("</mjx-container>", "");
 }
-
