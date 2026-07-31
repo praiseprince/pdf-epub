@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .next/
+.vercel/
 node_modules/
 coverage/
 dist/
