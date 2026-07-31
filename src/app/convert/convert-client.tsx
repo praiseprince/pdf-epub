@@ -13,7 +13,7 @@ type UploadAuthorization = {
   maxSizeBytes: number;
 };
 
-type Stage = "idle" | "uploading" | "uploaded" | "submitting" | "reading" | "parsed";
+type Stage = "idle" | "uploading" | "uploaded" | "submitting" | "reading" | "building" | "ready";
 
 type SubmitResponse = {
   jobToken: string;
@@ -43,6 +43,8 @@ export function ConvertClient() {
   const [uploadedBlob, setUploadedBlob] = useState<PutBlobResult | null>(null);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [paddleProgress, setPaddleProgress] = useState<StatusResponse["progress"]>(null);
+  const [downloadUrl, setDownloadUrl] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -55,6 +57,8 @@ export function ConvertClient() {
     setUploadedBlob(null);
     setPageCount(null);
     setPaddleProgress(null);
+    setDownloadUrl("");
+    setWarnings([]);
     setStage("idle");
 
     if (!nextFile) {
@@ -150,12 +154,12 @@ export function ConvertClient() {
 
   async function pollStatus(jobToken: string) {
     setStage("reading");
-    const startedAt = Date.now();
+    let elapsedMs = 0;
 
     while (true) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, Date.now() - startedAt < 60_000 ? 5_000 : 10_000)
-      );
+      const delayMs = elapsedMs < 60_000 ? 5_000 : 10_000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      elapsedMs += delayMs;
 
       const response = await fetch("/api/jobs/status", {
         method: "POST",
@@ -173,7 +177,7 @@ export function ConvertClient() {
       setPaddleProgress(status.progress);
 
       if (status.state === "completed") {
-        setStage("parsed");
+        await finalize(jobToken);
         return;
       }
 
@@ -182,6 +186,29 @@ export function ConvertClient() {
         return;
       }
     }
+  }
+
+  async function finalize(jobToken: string) {
+    setStage("building");
+    const response = await fetch("/api/jobs/finalize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobToken })
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      setError(body?.error ?? "EPUB generation failed.");
+      return;
+    }
+
+    const body = (await response.json()) as {
+      downloadUrl: string;
+      warnings: string[];
+    };
+    setDownloadUrl(body.downloadUrl);
+    setWarnings(body.warnings);
+    setStage("ready");
   }
 
   return (
@@ -264,27 +291,28 @@ export function ConvertClient() {
           PaddleOCR has read {paddleProgress.extractedPages} of {paddleProgress.totalPages} pages.
         </p>
       ) : null}
-      {stage === "parsed" ? (
-        <p className="success">Document parsed. EPUB building connects next.</p>
+      {stage === "ready" ? (
+        <p className="success">EPUB ready to download.</p>
       ) : null}
+      {warnings.length > 0 ? <p className="notice">{warnings.length} conversion warning(s).</p> : null}
 
       <ul className="progress" aria-label="Conversion progress">
-        <li className={["uploading", "submitting", "reading", "parsed"].includes(stage) ? "done" : ""}>
+        <li className={["uploading", "submitting", "reading", "building", "ready"].includes(stage) ? "done" : ""}>
           <span className="dot" /> Uploading PDF
         </li>
-        <li className={stage === "submitting" ? "current" : ["reading", "parsed"].includes(stage) ? "done" : ""}>
+        <li className={stage === "submitting" ? "current" : ["reading", "building", "ready"].includes(stage) ? "done" : ""}>
           <span className="dot" /> Sending to document parser
         </li>
-        <li className={stage === "reading" ? "current" : stage === "parsed" ? "done" : ""}>
+        <li className={stage === "reading" ? "current" : ["building", "ready"].includes(stage) ? "done" : ""}>
           <span className="dot" /> Reading document
         </li>
-        <li className={stage === "parsed" ? "current" : ""}>
+        <li className={stage === "building" || stage === "ready" ? "done" : ""}>
           <span className="dot" /> Processing formulas and figures
         </li>
-        <li>
+        <li className={stage === "building" ? "current" : stage === "ready" ? "done" : ""}>
           <span className="dot" /> Building EPUB
         </li>
-        <li>
+        <li className={stage === "ready" ? "current" : ""}>
           <span className="dot" /> Ready to download
         </li>
       </ul>
@@ -293,21 +321,28 @@ export function ConvertClient() {
         <button
           className="button"
           type="button"
-          disabled={!file || ["uploading", "submitting", "reading"].includes(stage)}
+          disabled={!file || ["uploading", "submitting", "reading", "building"].includes(stage)}
           onClick={convert}
         >
           {stage === "uploading"
             ? "Uploading PDF"
             : stage === "submitting"
               ? "Sending to parser"
-              : stage === "reading"
+            : stage === "reading"
                 ? "Reading document"
-                : "Convert to EPUB"}
+                : stage === "building"
+                  ? "Building EPUB"
+                  : "Convert to EPUB"}
         </button>
+        {downloadUrl ? (
+          <a className="button" href={downloadUrl} download>
+            Download EPUB
+          </a>
+        ) : null}
         <button
           className="button secondary"
           type="button"
-          disabled={["uploading", "submitting", "reading"].includes(stage)}
+          disabled={["uploading", "submitting", "reading", "building"].includes(stage)}
           onClick={() => void chooseFile(null)}
         >
           Cancel

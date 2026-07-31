@@ -1,6 +1,7 @@
 import {
   Model,
   PaddleOCRClient,
+  type DocParsingResult,
   type Job,
   type JobStatus,
   type PaddleOCRVLOptions
@@ -63,7 +64,10 @@ export async function getPaddleStatus(jobId: string): Promise<JobStatus> {
   return withPaddleRetries(() => client().getStatus(jobId), 2);
 }
 
+export async function getPaddleDocumentResult(jobId: string): Promise<DocParsingResult> {
+  return withPaddleRetries(() => client().waitDocumentParsingResult(jobId), 2);
+}
+
 export function mapPaddleError(error: unknown) {
   return toPublicPaddleError(error);
 }
-
