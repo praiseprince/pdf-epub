@@ -34,6 +34,9 @@ type StatusResponse = {
 export function ConvertClient() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const uploadTokenRef = useRef("");
+  const jobTokenRef = useRef("");
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
@@ -41,6 +44,7 @@ export function ConvertClient() {
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState("");
   const [uploadedBlob, setUploadedBlob] = useState<PutBlobResult | null>(null);
+  const [uploadToken, setUploadToken] = useState("");
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [paddleProgress, setPaddleProgress] = useState<StatusResponse["progress"]>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
@@ -60,6 +64,9 @@ export function ConvertClient() {
     setPaddleProgress(null);
     setDownloadUrl("");
     setJobToken("");
+    setUploadToken("");
+    jobTokenRef.current = "";
+    uploadTokenRef.current = "";
     setWarnings([]);
     setStage("idle");
 
@@ -92,33 +99,43 @@ export function ConvertClient() {
       return;
     }
 
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
+
     setError("");
     setStage("uploading");
     setUploadedBlob(null);
 
-    const authResponse = await fetch("/api/upload/authorize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: file.name,
-        size: file.size,
-        contentType: file.type || "application/pdf"
-      })
-    });
-
-    if (!authResponse.ok) {
-      const body = (await authResponse.json().catch(() => null)) as { error?: string } | null;
-      setStage("idle");
-      setError(body?.error ?? "Upload failed.");
-      return;
-    }
-
-    const authorization = (await authResponse.json()) as UploadAuthorization;
-
     try {
+      const authResponse = await fetch("/api/upload/authorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+          filename: file.name,
+          size: file.size,
+          contentType: file.type || "application/pdf"
+        })
+      });
+
+      if (!authResponse.ok) {
+        const body = (await authResponse.json().catch(() => null)) as { error?: string } | null;
+        setStage("idle");
+        setError(body?.error ?? "Upload failed.");
+        return;
+      }
+
+      const authorization = (await authResponse.json()) as UploadAuthorization;
+      uploadTokenRef.current = authorization.uploadToken;
+      setUploadToken(authorization.uploadToken);
+
       const blob = await upload(authorization.inputPath, file, {
         access: "private",
         contentType: "application/pdf",
+        multipart: file.size > 8 * 1024 * 1024,
+        abortSignal: signal,
         handleUploadUrl: "/api/upload/authorize",
         clientPayload: JSON.stringify({ uploadToken: authorization.uploadToken })
       });
@@ -129,6 +146,7 @@ export function ConvertClient() {
       const submitResponse = await fetch("/api/jobs/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
           uploadToken: authorization.uploadToken,
           inputPath: authorization.inputPath,
@@ -147,26 +165,52 @@ export function ConvertClient() {
       const submitted = (await submitResponse.json()) as SubmitResponse;
       setPageCount(submitted.pageCount);
       setJobToken(submitted.jobToken);
+      jobTokenRef.current = submitted.jobToken;
       sessionStorage.setItem("active-job-token", submitted.jobToken);
-      await pollStatus(submitted.jobToken);
+      await pollStatus(submitted.jobToken, signal);
     } catch {
+      if (signal.aborted) {
+        return;
+      }
       setStage("idle");
       setError("Upload failed.");
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }
 
-  async function pollStatus(jobToken: string) {
+  async function waitForPoll(delayMs: number, signal: AbortSignal) {
+    await new Promise<void>((resolve) => {
+      const timer = window.setTimeout(resolve, delayMs);
+      signal.addEventListener(
+        "abort",
+        () => {
+          window.clearTimeout(timer);
+          resolve();
+        },
+        { once: true }
+      );
+    });
+  }
+
+  async function pollStatus(jobToken: string, signal: AbortSignal) {
     setStage("reading");
     let elapsedMs = 0;
 
     while (true) {
       const delayMs = elapsedMs < 60_000 ? 5_000 : 10_000;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await waitForPoll(delayMs, signal);
+      if (signal.aborted) {
+        return;
+      }
       elapsedMs += delayMs;
 
       const response = await fetch("/api/jobs/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({ jobToken })
       });
 
@@ -180,7 +224,7 @@ export function ConvertClient() {
       setPaddleProgress(status.progress);
 
       if (status.state === "completed") {
-        await finalize(jobToken);
+        await finalize(jobToken, signal);
         return;
       }
 
@@ -191,11 +235,12 @@ export function ConvertClient() {
     }
   }
 
-  async function finalize(jobToken: string) {
+  async function finalize(jobToken: string, signal: AbortSignal) {
     setStage("building");
     const response = await fetch("/api/jobs/finalize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({ jobToken })
     });
 
@@ -214,23 +259,48 @@ export function ConvertClient() {
     setStage("ready");
   }
 
-  async function deleteNow() {
-    const token = jobToken || sessionStorage.getItem("active-job-token");
-    if (!token) {
+  async function deleteTemporaryFiles() {
+    const token = jobTokenRef.current || jobToken || sessionStorage.getItem("active-job-token");
+    const uploadToken = uploadTokenRef.current;
+    if (!token && !uploadToken) {
       return;
     }
 
     await fetch("/api/jobs/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobToken: token })
+      body: JSON.stringify(token ? { jobToken: token } : { uploadToken })
     });
+  }
+
+  async function deleteNow() {
+    abortControllerRef.current?.abort();
+    await deleteTemporaryFiles();
     sessionStorage.removeItem("active-job-token");
     setDownloadUrl("");
     setJobToken("");
+    setUploadToken("");
+    jobTokenRef.current = "";
+    uploadTokenRef.current = "";
     setStage("idle");
     setUploadedBlob(null);
     setFile(null);
+  }
+
+  async function cancelConversion() {
+    abortControllerRef.current?.abort();
+    await deleteTemporaryFiles().catch(() => undefined);
+    sessionStorage.removeItem("active-job-token");
+    setUploadedBlob(null);
+    setPageCount(null);
+    setPaddleProgress(null);
+    setDownloadUrl("");
+    setJobToken("");
+    setUploadToken("");
+    jobTokenRef.current = "";
+    uploadTokenRef.current = "";
+    setWarnings([]);
+    setStage("idle");
   }
 
   function scheduleCleanupAfterDownload() {
@@ -238,6 +308,8 @@ export function ConvertClient() {
       void deleteNow();
     }, 10_000);
   }
+
+  const isConverting = ["uploading", "submitting", "reading", "building"].includes(stage);
 
   return (
     <section className="panel stack" aria-labelledby="convert-title">
@@ -375,8 +447,12 @@ export function ConvertClient() {
         <button
           className="button secondary"
           type="button"
-          disabled={["uploading", "submitting", "reading", "building"].includes(stage)}
-          onClick={() => void chooseFile(null)}
+          disabled={!file && !jobToken && !downloadUrl && !uploadToken}
+          onClick={() =>
+            isConverting || jobToken || downloadUrl || uploadToken
+              ? void cancelConversion()
+              : void chooseFile(null)
+          }
         >
           Cancel
         </button>
