@@ -34,3 +34,20 @@ describe("XHTML renderer figures", () => {
   });
 });
 
+describe("XHTML renderer tables", () => {
+  it("renders GFM tables as semantic tables with adjacent captions", async () => {
+    const root = parseMarkdown("| A | B |\n| - | - |\n| 1 | 2 |\n\nTable 1. Small values.");
+    const html = await renderRoot(root, {
+      resources: new ResourceRegistry(),
+      imageMap: new Map(),
+      warnings: [],
+      chapterId: "chapter-1"
+    });
+
+    expect(html).toContain("<table>");
+    expect(html).toContain("<caption>Table 1. Small values.</caption>");
+    expect(html).toContain("<thead>");
+    expect(html).toContain("<th>A</th>");
+    expect(html).toContain("<td>1</td>");
+  });
+});

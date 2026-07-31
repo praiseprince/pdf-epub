@@ -143,6 +143,14 @@ function isCaptionParagraph(node: Content | undefined) {
   return /^(figure|fig\.|table|chart|diagram)\s+\d+/i.test(nodeText(node));
 }
 
+function isTableCaptionParagraph(node: Content | undefined) {
+  if (!node || node.type !== "paragraph") {
+    return false;
+  }
+
+  return /^table\s+\d+/i.test(nodeText(node));
+}
+
 async function renderImage(node: Image, context: RenderContext) {
   const href = context.imageMap.get(node.url);
   const alt = escapeXml(node.alt || "Document figure");
@@ -204,7 +212,7 @@ async function renderListItem(node: ListItem, context: RenderContext) {
   return `<li>${(await Promise.all(node.children.map((child) => renderBlock(child, context)))).join("")}</li>`;
 }
 
-async function renderTable(node: Table, context: RenderContext) {
+async function renderTable(node: Table, context: RenderContext, caption?: string) {
   const rows = await Promise.all(
     node.children.map(async (row, rowIndex) => {
       const cellTag = rowIndex === 0 ? "th" : "td";
@@ -216,7 +224,7 @@ async function renderTable(node: Table, context: RenderContext) {
   );
 
   const [head, ...body] = rows;
-  return `<table>${head ? `<thead>${head}</thead>` : ""}<tbody>${body.join("")}</tbody></table>`;
+  return `<table>${caption ? `<caption>${caption}</caption>` : ""}${head ? `<thead>${head}</thead>` : ""}<tbody>${body.join("")}</tbody></table>`;
 }
 
 async function renderFootnotes(context: RenderContext) {
@@ -259,6 +267,13 @@ export async function renderRoot(root: Root, context: Omit<RenderContext, "footn
       } else {
         out.push(`<figure>${image}</figure>`);
       }
+      continue;
+    }
+
+    if (node.type === "table" && isTableCaptionParagraph(children[index + 1])) {
+      const caption = await renderInlines((children[index + 1] as Paragraph).children, fullContext);
+      out.push(await renderTable(node as Table, fullContext, caption));
+      index += 1;
       continue;
     }
 
