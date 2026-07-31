@@ -13,7 +13,23 @@ type UploadAuthorization = {
   maxSizeBytes: number;
 };
 
-type Stage = "idle" | "uploading" | "uploaded";
+type Stage = "idle" | "uploading" | "uploaded" | "submitting" | "reading" | "parsed";
+
+type SubmitResponse = {
+  jobToken: string;
+  pageCount: number;
+  stage: string;
+};
+
+type StatusResponse = {
+  state: "pending" | "running" | "completed" | "failed";
+  stage: string;
+  progress: {
+    totalPages: number;
+    extractedPages: number;
+  } | null;
+  error?: string;
+};
 
 export function ConvertClient() {
   const router = useRouter();
@@ -25,6 +41,8 @@ export function ConvertClient() {
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState("");
   const [uploadedBlob, setUploadedBlob] = useState<PutBlobResult | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [paddleProgress, setPaddleProgress] = useState<StatusResponse["progress"]>(null);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -35,6 +53,8 @@ export function ConvertClient() {
   async function chooseFile(nextFile: File | null) {
     setError("");
     setUploadedBlob(null);
+    setPageCount(null);
+    setPaddleProgress(null);
     setStage("idle");
 
     if (!nextFile) {
@@ -98,20 +118,69 @@ export function ConvertClient() {
       });
 
       setUploadedBlob(blob);
-      setStage("uploaded");
-      sessionStorage.setItem(
-        "active-upload",
-        JSON.stringify({
-          jobId: authorization.jobId,
-          inputPath: authorization.inputPath,
+      setStage("submitting");
+
+      const submitResponse = await fetch("/api/jobs/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           uploadToken: authorization.uploadToken,
+          inputPath: authorization.inputPath,
           title,
           author
         })
-      );
+      });
+
+      if (!submitResponse.ok) {
+        const body = (await submitResponse.json().catch(() => null)) as { error?: string } | null;
+        setStage("uploaded");
+        setError(body?.error ?? "Document parsing failed.");
+        return;
+      }
+
+      const submitted = (await submitResponse.json()) as SubmitResponse;
+      setPageCount(submitted.pageCount);
+      sessionStorage.setItem("active-job-token", submitted.jobToken);
+      await pollStatus(submitted.jobToken);
     } catch {
       setStage("idle");
       setError("Upload failed.");
+    }
+  }
+
+  async function pollStatus(jobToken: string) {
+    setStage("reading");
+    const startedAt = Date.now();
+
+    while (true) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Date.now() - startedAt < 60_000 ? 5_000 : 10_000)
+      );
+
+      const response = await fetch("/api/jobs/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobToken })
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "Document parsing failed.");
+        return;
+      }
+
+      const status = (await response.json()) as StatusResponse;
+      setPaddleProgress(status.progress);
+
+      if (status.state === "completed") {
+        setStage("parsed");
+        return;
+      }
+
+      if (status.state === "failed") {
+        setError(status.error || "Document parsing failed.");
+        return;
+      }
     }
   }
 
@@ -186,19 +255,30 @@ export function ConvertClient() {
       </div>
 
       {error ? <p className="error">{error}</p> : null}
-      {uploadedBlob ? <p className="success">PDF uploaded. Document parsing connects next.</p> : null}
+      {uploadedBlob && stage === "uploaded" ? (
+        <p className="success">PDF uploaded. Waiting to submit to PaddleOCR.</p>
+      ) : null}
+      {pageCount ? <p className="notice">Validated {pageCount} page PDF.</p> : null}
+      {paddleProgress ? (
+        <p className="notice">
+          PaddleOCR has read {paddleProgress.extractedPages} of {paddleProgress.totalPages} pages.
+        </p>
+      ) : null}
+      {stage === "parsed" ? (
+        <p className="success">Document parsed. EPUB building connects next.</p>
+      ) : null}
 
       <ul className="progress" aria-label="Conversion progress">
-        <li className={stage === "uploading" || stage === "uploaded" ? "current" : ""}>
+        <li className={["uploading", "submitting", "reading", "parsed"].includes(stage) ? "done" : ""}>
           <span className="dot" /> Uploading PDF
         </li>
-        <li>
+        <li className={stage === "submitting" ? "current" : ["reading", "parsed"].includes(stage) ? "done" : ""}>
           <span className="dot" /> Sending to document parser
         </li>
-        <li>
+        <li className={stage === "reading" ? "current" : stage === "parsed" ? "done" : ""}>
           <span className="dot" /> Reading document
         </li>
-        <li>
+        <li className={stage === "parsed" ? "current" : ""}>
           <span className="dot" /> Processing formulas and figures
         </li>
         <li>
@@ -210,13 +290,24 @@ export function ConvertClient() {
       </ul>
 
       <div className="row">
-        <button className="button" type="button" disabled={!file || stage === "uploading"} onClick={convert}>
-          {stage === "uploading" ? "Uploading PDF" : "Convert to EPUB"}
+        <button
+          className="button"
+          type="button"
+          disabled={!file || ["uploading", "submitting", "reading"].includes(stage)}
+          onClick={convert}
+        >
+          {stage === "uploading"
+            ? "Uploading PDF"
+            : stage === "submitting"
+              ? "Sending to parser"
+              : stage === "reading"
+                ? "Reading document"
+                : "Convert to EPUB"}
         </button>
         <button
           className="button secondary"
           type="button"
-          disabled={stage === "uploading"}
+          disabled={["uploading", "submitting", "reading"].includes(stage)}
           onClick={() => void chooseFile(null)}
         >
           Cancel
