@@ -144,6 +144,51 @@ The included `vercel.json` sets Node.js Function duration limits and one daily
 cleanup cron for `/api/cleanup`. The cron route requires the `x-cron-secret`
 header to match `CRON_SECRET`; if you call it manually, send that header.
 
+## Manage Vercel Secrets
+
+Production conversion requires `PADDLEOCR_ACCESS_TOKEN` in Vercel. Add or rotate
+it without printing the token in source control:
+
+```sh
+vercel env rm PADDLEOCR_ACCESS_TOKEN production
+vercel env rm PADDLEOCR_ACCESS_TOKEN preview
+
+vercel env add PADDLEOCR_ACCESS_TOKEN production
+vercel env add PADDLEOCR_ACCESS_TOKEN preview
+```
+
+Paste the Baidu AI Studio / PaddleOCR token when prompted, then redeploy:
+
+```sh
+vercel deploy --prod --yes
+```
+
+To change the app PIN, generate a new hash locally:
+
+```sh
+npm run generate-secrets -- "your-new-long-pin"
+```
+
+Copy only the generated `APP_PIN_HASH=...` value and update Vercel:
+
+```sh
+vercel env rm APP_PIN_HASH production
+vercel env rm APP_PIN_HASH preview
+
+vercel env add APP_PIN_HASH production
+vercel env add APP_PIN_HASH preview
+```
+
+Paste the new hash when prompted, then redeploy:
+
+```sh
+vercel deploy --prod --yes
+```
+
+Existing browser sessions can remain valid until their cookie expires. To force
+a fresh login everywhere, rotate `SESSION_SECRET` the same way and redeploy.
+Rotate `JOB_TOKEN_SECRET` to invalidate active in-progress conversions.
+
 ## Temporary Deletion
 
 Temporary Blob paths are restricted to:
