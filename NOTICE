@@ -1,0 +1,10 @@
+This project is inspired by jarodise/pdf2epub-paddle:
+https://github.com/jarodise/pdf2epub-paddle
+
+The upstream project is licensed under the MIT License. Its copyright and
+permission notice are preserved in LICENSE and in this notice as required.
+
+This implementation is a TypeScript/Next.js redesign. It does not copy the
+obsolete Python API endpoint flow. It uses the official hosted PaddleOCR
+TypeScript SDK and Vercel Blob direct uploads.
+

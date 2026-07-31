@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.next/
+node_modules/
+coverage/
+dist/
+tmp/
+*.tsbuildinfo
+*.epub
+*.pdf
+*.log
+playwright-report/
+test-results/
