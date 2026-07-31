@@ -1,0 +1,16 @@
+.env
+.env.*
+.next/
+.vercel/
+node_modules/
+coverage/
+dist/
+tmp/
+testsets/pdfs/
+testsets/screenshots/
+testsets/epubs/
+testsets/reports/
+*.pdf
+*.epub
+*.tsbuildinfo
+*.log
