@@ -37,7 +37,13 @@ describe("upload tokens", () => {
       secret
     );
 
-    await expect(verifyUploadToken(`${token.slice(0, -1)}x`, secret)).rejects.toThrow();
+    const [header, payload, signature] = token.split(".");
+    if (!header || !payload || !signature) {
+      throw new Error("Expected a compact JWT.");
+    }
+    const tamperedPayload = `${payload.slice(0, -1)}${payload.endsWith("A") ? "B" : "A"}`;
+
+    await expect(verifyUploadToken(`${header}.${tamperedPayload}.${signature}`, secret)).rejects.toThrow();
   });
 });
 
@@ -62,4 +68,3 @@ describe("job tokens", () => {
     });
   });
 });
-
