@@ -194,6 +194,16 @@ npm run build
 npm audit --audit-level=high
 ```
 
+Prepare a local stress corpus of open-access papers, HTML-printed PDFs, and a
+scanned-like image-only PDF:
+
+```sh
+npm run prepare-testset
+```
+
+The generated PDFs are ignored under `testsets/pdfs/`. See
+`testsets/README.md` for the manual conversion pass.
+
 Run EPUBCheck locally if Java and the EPUBCheck jar are installed:
 
 ```sh

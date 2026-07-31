@@ -13,3 +13,7 @@ tmp/
 *.log
 playwright-report/
 test-results/
+testsets/pdfs/
+testsets/screenshots/
+testsets/epubs/
+testsets/reports/

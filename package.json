@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sample-epub": "tsx scripts/make-sample-epub.ts",
+    "prepare-testset": "tsx scripts/prepare-testset.ts",
     "delete-temp-blobs": "tsx scripts/delete-temp-blobs.ts",
     "generate-secrets": "tsx scripts/generate-secrets.ts",
     "epubcheck": "tsx scripts/run-epubcheck.ts"

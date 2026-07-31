@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "outputDirectory": "testsets/pdfs",
+  "items": [
+    {
+      "id": "attention-all-you-need",
+      "type": "pdf",
+      "filename": "attention-all-you-need.pdf",
+      "url": "https://arxiv.org/pdf/1706.03762",
+      "description": "Two-column research paper with figures, tables, citations, and mathematical notation."
+    },
+    {
+      "id": "segment-anything",
+      "type": "pdf",
+      "filename": "segment-anything.pdf",
+      "url": "https://arxiv.org/pdf/2304.02643",
+      "description": "Diagram- and image-intensive research paper with tables and captions."
+    },
+    {
+      "id": "neural-ordinary-differential-equations",
+      "type": "pdf",
+      "filename": "neural-ordinary-differential-equations.pdf",
+      "url": "https://arxiv.org/pdf/1806.07366",
+      "description": "Equation-heavy paper with figures, algorithms, and multi-column layout."
+    },
+    {
+      "id": "adam-optimizer",
+      "type": "pdf",
+      "filename": "adam-optimizer.pdf",
+      "url": "https://arxiv.org/pdf/1412.6980",
+      "description": "Math-heavy optimizer paper with formulas and pseudocode."
+    },
+    {
+      "id": "gravitational-waves-observation",
+      "type": "pdf",
+      "filename": "gravitational-waves-observation.pdf",
+      "url": "https://arxiv.org/pdf/1602.03837",
+      "description": "Chart-heavy physics paper with dense two-column scientific layout."
+    },
+    {
+      "id": "mdn-css-grid-html",
+      "type": "html-pdf",
+      "filename": "html-mdn-css-grid.pdf",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout/Basic_concepts",
+      "description": "Online technical HTML article printed to PDF with code blocks, links, and diagrams."
+    },
+    {
+      "id": "w3c-accessibility-intro-html",
+      "type": "html-pdf",
+      "filename": "html-w3c-accessibility-intro.pdf",
+      "url": "https://www.w3.org/WAI/fundamentals/accessibility-intro/",
+      "description": "Online HTML article printed to PDF with headings, links, references, and responsive layout."
+    },
+    {
+      "id": "scanned-mdn-grid-screenshot",
+      "type": "screenshot-pdf",
+      "filename": "scanned-mdn-grid-screenshot.pdf",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout/Basic_concepts",
+      "description": "Image-only PDF made from a page screenshot to simulate scanned-page OCR behavior."
+    }
+  ]
+}
