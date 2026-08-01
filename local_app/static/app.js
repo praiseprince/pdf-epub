@@ -125,21 +125,12 @@ function actionButton(label, className, handler) {
   return button;
 }
 
-function strategyLabel(strategy) {
-  if (strategy === "full_document") return "Full PDF";
-  if (strategy === "pdf_chunks") return "PDF chunks";
-  if (strategy === "rendered_pages") return "Rendered pages";
-  if (strategy === "auto") return "Auto retry";
-  return strategy || "";
-}
-
 function modeLabel(job) {
   if (job.conversion_mode === "comic") {
     const output = (job.comic_output_format || "").toUpperCase();
     return ["Comic", output, comicLayoutLabel(job.comic_layout)].filter(Boolean).join(" · ");
   }
-  const mathRepair = job.math_repair_provider && job.math_repair_provider !== "off" ? job.math_repair_label : "";
-  return [job.parser_model, strategyLabel(job.parser_strategy), mathRepair].filter(Boolean).join(" · ");
+  return ["Document", job.parser_model].filter(Boolean).join(" · ");
 }
 
 function comicLayoutLabel(layout) {
@@ -164,9 +155,6 @@ if (fileInput) {
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
     selectedFile.textContent = file ? `${file.name} · ${formatBytes(file.size)}` : "Drop a file here or select one.";
-    if (file && !document.querySelector("#title").value) {
-      document.querySelector("#title").value = file.name.replace(/\.pdf$/i, "");
-    }
   });
 }
 

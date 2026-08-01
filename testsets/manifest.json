@@ -64,6 +64,71 @@
       "filename": "scanned-mdn-grid-screenshot.pdf",
       "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout/Basic_concepts",
       "description": "Image-only PDF made from a page screenshot to simulate scanned-page OCR behavior."
+    },
+    {
+      "id": "aeon-technocratic-international",
+      "type": "html-pdf",
+      "filename": "Are we witnessing the end of the technocratic international_ _ Aeon Essays.pdf",
+      "url": "https://aeon.co/essays/are-we-witnessing-the-end-of-the-technocratic-international",
+      "description": "Long-form online essay printed to PDF, useful for article layout and typography checks."
+    },
+    {
+      "id": "pepper-carrot-episode-22",
+      "type": "comic-pdf",
+      "filename": "pepper-carrot-episode-22-the-voting-system.pdf",
+      "url": "https://media.githubusercontent.com/media/pSub/pepper-and-carrot-pdfs/master/en/episode-22.pdf",
+      "sourcePage": "https://www.peppercarrot.com/en/webcomic/ep22_The-Voting-System.html",
+      "license": "Creative Commons Attribution 4.0",
+      "description": "Color webcomic PDF with speech bubbles, panels, full-page art, and a webtoon-style test profile.",
+      "testProfiles": [
+        {
+          "conversionMode": "comic",
+          "outputFormat": "kepub",
+          "layout": "webtoon"
+        },
+        {
+          "conversionMode": "comic",
+          "outputFormat": "cbz",
+          "layout": "comic"
+        }
+      ]
+    },
+    {
+      "id": "hokusai-manga-volume-4",
+      "type": "manga-pdf",
+      "filename": "hokusai-manga-volume-4.pdf",
+      "url": "https://archive.org/download/hokusaimangav4kats/hokusaimangav4kats.pdf",
+      "sourcePage": "https://library.si.edu/digital-library/book/hokusaimangav4kats",
+      "license": "Public domain",
+      "description": "Right-to-left public-domain manga/sketchbook scan with monochrome art and historical page geometry.",
+      "testProfiles": [
+        {
+          "conversionMode": "comic",
+          "outputFormat": "kepub",
+          "layout": "manga"
+        }
+      ]
+    },
+    {
+      "id": "public-domain-comics-4",
+      "type": "comic-pdf",
+      "filename": "public-domain-comics-4-christopher-watts.pdf",
+      "url": "https://archive.org/download/PublicDomainComics4ChristopherWatts/Public%20Domain%20Comics%20%234%20-%20Christopher%20Watts.pdf",
+      "sourcePage": "https://archive.org/details/PublicDomainComics4ChristopherWatts",
+      "license": "Public domain",
+      "description": "Golden-age public-domain comic PDF for western left-to-right page and panel testing.",
+      "testProfiles": [
+        {
+          "conversionMode": "comic",
+          "outputFormat": "kepub",
+          "layout": "comic"
+        },
+        {
+          "conversionMode": "comic",
+          "outputFormat": "epub",
+          "layout": "comic"
+        }
+      ]
     }
   ]
 }

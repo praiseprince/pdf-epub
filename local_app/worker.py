@@ -17,7 +17,6 @@ from .conversion_options import (
 )
 from .database import JobRecord, JobStore, utc_now
 from .epub_builder import build_epub, figure_crop_page_numbers, write_raw_result
-from .llm_repair import MathRepairClient
 from .parser_options import ParserModel, normalize_parser_model, normalize_parser_strategy
 from .paths import job_dirs, job_epub_dir, job_ocr_dir, job_pages_dir
 from .paddle_client import PaddleClient, PaddleClientError
@@ -159,12 +158,12 @@ class JobWorker:
                     ocr_notes=ocr_notes,
                 )
                 if not raw_result.get("pages"):
-                    raise RuntimeError("Baidu OCR returned no pages.")
+                    raise RuntimeError("PaddleOCR returned no pages.")
                 raw_result_path = job_ocr_dir(self.settings, job_id) / "raw-result.json"
                 write_raw_result(raw_result_path, raw_result)
                 self.store.update_job(job_id, raw_result_path=raw_result_path)
             except PaddleClientError as exc:
-                raise RuntimeError(f"Baidu OCR failed after retries: {exc}") from exc
+                raise RuntimeError(f"PaddleOCR failed after retries: {exc}") from exc
 
             self._check_cancel(job_id)
             self._render_figure_crop_pages(job_id, source_path, raw_result)
@@ -195,8 +194,6 @@ class JobWorker:
                 snapshot_paths=build_snapshot_paths,
                 snapshot_source_dir=job_pages_dir(self.settings, job_id),
                 assets_source_dir=ocr_assets_dir,
-                math_repairer=MathRepairClient(self.settings, job.math_repair_provider),
-                math_output="png",
             )
             if job.create_kepub:
                 kepub_path = output_path.with_name(f"{output_path.stem}.kepub.epub")
@@ -210,8 +207,6 @@ class JobWorker:
                     snapshot_paths=build_snapshot_paths,
                     snapshot_source_dir=job_pages_dir(self.settings, job_id),
                     assets_source_dir=ocr_assets_dir,
-                    math_repairer=MathRepairClient(self.settings, job.math_repair_provider),
-                    math_output="mathml",
                 )
                 build_result.warnings.extend(kepub_result.warnings)
 
@@ -272,6 +267,10 @@ class JobWorker:
         on_full_status: Any,
         ocr_notes: list[str],
     ) -> dict[str, Any]:
+        if self.settings.local_paddle_mode == "local":
+            ocr_notes.append("OCR used local PaddleOCR-VL page-by-page checkpoints.")
+            return self._parse_rendered_pages(job, source_path, pages=pages, parser_model=parser_model, client=client)
+
         auto_deadline = None
         if parser_strategy == "auto":
             auto_deadline = time.monotonic() + max(1, self.settings.paddle_auto_ocr_timeout_seconds)
@@ -481,22 +480,27 @@ class JobWorker:
         self.store.update_job(
             job.id,
             stage="Rendering OCR pages",
-            message="Rendering pages locally for page-by-page Baidu OCR.",
+            message="Rendering pages locally for page-by-page PaddleOCR.",
             progress_done=0,
             progress_total=pages,
         )
         rendered_dir = job_ocr_dir(self.settings, job.id) / "rendered-pages"
         shutil.rmtree(rendered_dir, ignore_errors=True)
-        page_paths = render_pdf_pages(source_path, rendered_dir, dpi=self.settings.snapshot_dpi)
+        ocr_dpi = self.settings.local_ocr_dpi if self.settings.local_paddle_mode == "local" else self.settings.snapshot_dpi
+        page_paths = render_pdf_pages(source_path, rendered_dir, dpi=ocr_dpi)
         if len(page_paths) != pages:
             raise PaddleClientError(f"Rendered {len(page_paths)} page image(s), expected {pages}.")
 
         def on_page_start(page: int, total: int, attempt: int) -> None:
             suffix = f" attempt {attempt}" if attempt > 1 else ""
+            if self.settings.local_paddle_mode == "local":
+                message = f"Running local PaddleOCR on page {page} of {total}{suffix}."
+            else:
+                message = f"Uploading rendered page {page} of {total} to Baidu{suffix}."
             self.store.update_job(
                 job.id,
                 stage="Submitting page OCR",
-                message=f"Uploading rendered page {page} of {total} to Baidu{suffix}.",
+                message=message,
                 progress_done=page - 1,
                 progress_total=total,
             )
@@ -504,7 +508,7 @@ class JobWorker:
         def on_page_status(page: int, attempt: int, status: dict[str, Any]) -> None:
             update: dict[str, Any] = {
                 "stage": "Reading page OCR",
-                "message": f"Baidu is reading page {page} of {pages}.",
+                "message": f"PaddleOCR is reading page {page} of {pages}.",
                 "progress_done": page - 1,
                 "progress_total": pages,
             }
@@ -528,11 +532,12 @@ class JobWorker:
             on_page_start=on_page_start,
             on_status=on_page_status,
             should_cancel=lambda: self._cancel_requested(job.id),
+            checkpoint_dir=job_ocr_dir(self.settings, job.id) / "local-page-checkpoints",
         )
         self.store.update_job(
             job.id,
             stage="Reading page OCR",
-            message="Baidu page OCR finished.",
+            message="PaddleOCR page OCR finished.",
             progress_done=pages,
             progress_total=pages,
         )

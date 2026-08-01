@@ -25,16 +25,6 @@
             <span class="drop-title">Choose PDF</span>
             <span id="selected-file" class="drop-meta">Drop a file here or select one.</span>
           </label>
-          <div class="metadata-grid">
-            <label>
-              Title
-              <input id="title" name="title" type="text" maxlength="200">
-            </label>
-            <label>
-              Author
-              <input id="author" name="author" type="text" maxlength="200">
-            </label>
-          </div>
           <label class="mode-field">
             Conversion type
             <select id="conversion-mode" name="conversion_mode">
@@ -43,36 +33,9 @@
             </select>
           </label>
           <div id="document-options">
-            <div class="metadata-grid parser-grid">
-              <label>
-                Baidu model
-                <select id="parser-model" name="parser_model">
-                  {% for model in parser_models %}
-                    <option value="{{ model }}" {% if model == default_parser_model %}selected{% endif %}>{{ model }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label>
-                OCR path
-                <select id="parser-strategy" name="parser_strategy">
-                  <option value="auto" selected>Auto retry</option>
-                  <option value="full_document">Full PDF only</option>
-                  <option value="pdf_chunks">PDF chunks</option>
-                  <option value="rendered_pages">Rendered pages</option>
-                </select>
-              </label>
-              <label>
-                Math repair
-                <select id="math-repair-provider" name="math_repair_provider">
-                  {% for value, label in math_repair_providers %}
-                    <option value="{{ value }}" {% if value == default_math_repair_provider %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-            </div>
             <label class="check-row">
               <input name="create_kepub" type="checkbox" value="true" {% if create_kepub_default %}checked{% endif %}>
-              Create Kobo MathML .kepub.epub
+              Also create Kobo KEPUB
             </label>
           </div>
           <div id="comic-options" hidden>

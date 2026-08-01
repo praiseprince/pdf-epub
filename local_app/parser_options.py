@@ -3,14 +3,11 @@ from __future__ import annotations
 from typing import Literal
 
 
-ParserModel = Literal["PaddleOCR-VL-1.6", "PaddleOCR-VL-1.5", "PaddleOCR-VL", "PP-StructureV3"]
+ParserModel = Literal["PaddleOCR-VL-1.6"]
 ParserStrategy = Literal["auto", "full_document", "pdf_chunks", "rendered_pages"]
 
 PARSER_MODELS: tuple[ParserModel, ...] = (
     "PaddleOCR-VL-1.6",
-    "PaddleOCR-VL-1.5",
-    "PaddleOCR-VL",
-    "PP-StructureV3",
 )
 PARSER_STRATEGIES: tuple[ParserStrategy, ...] = ("auto", "full_document", "pdf_chunks", "rendered_pages")
 

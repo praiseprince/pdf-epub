@@ -8,7 +8,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import bleach
 from bs4 import BeautifulSoup
@@ -16,7 +16,7 @@ from markdown_it import MarkdownIt
 from PIL import Image
 
 from .assets import AssetBundle, normalize_asset_key
-from .math_render import MathMLRenderer, MathRenderer, MathRepairer, collect_math_tokens, rewrite_math
+from .math_render import MathRenderer, collect_math_tokens, rewrite_math
 
 
 @dataclass
@@ -59,8 +59,6 @@ figcaption { font-size: 0.9em; line-height: 1.35; margin-top: 0.4em; }
 .math-inline { display: inline-block; margin: 0 0.08em; vertical-align: -0.32em; max-height: 1.75em; width: auto; }
 .math-block { text-align: center; margin: 1.05em 0; page-break-inside: avoid; break-inside: avoid; }
 .math-display { background: #fff; display: block; height: auto; margin: 0.4em auto; max-width: 100%; }
-.mathml-inline math { display: inline; }
-.mathml-block math { display: block; margin: 0.45em auto; max-width: 100%; }
 .math-source { font-family: serif; white-space: pre-wrap; }
 table { border-collapse: collapse; width: 100%; max-width: 100%; margin: 1em 0; font-size: 0.92em; }
 th, td { border: 1px solid #999; padding: 0.3em 0.45em; vertical-align: top; }
@@ -221,8 +219,6 @@ def build_epub(
     snapshot_paths: list[Path],
     snapshot_source_dir: Path,
     assets_source_dir: Path,
-    math_repairer: MathRepairer | None = None,
-    math_output: Literal["png", "mathml"] = "png",
 ) -> EpubBuildResult:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     warnings = list(bundle.warnings)
@@ -231,11 +227,7 @@ def build_epub(
 
     pages = _result_pages(raw_result)
     markdown_pages = [_markdown_with_formula_numbers(page) for page in pages]
-    math_renderer = (
-        MathMLRenderer(repairer=math_repairer)
-        if math_output == "mathml"
-        else MathRenderer(assets_source_dir / "math", repairer=math_repairer)
-    )
+    math_renderer = MathRenderer(assets_source_dir / "math")
     math_bundle = math_renderer.render_many(collect_math_tokens(markdown_pages), warnings)
     bundle.image_map.update(math_bundle.image_map)
     bundle.manifest_items.update(math_bundle.manifest_items)
@@ -282,7 +274,7 @@ def build_epub(
                 "title": f"Page {page_number}",
                 "filename": filename,
                 "content": content,
-                "properties": "mathml" if "<math " in content else "",
+                "properties": "",
             }
         )
 

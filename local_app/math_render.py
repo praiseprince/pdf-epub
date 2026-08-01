@@ -7,7 +7,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Callable, Iterable
 
 from PIL import Image
 
@@ -20,15 +20,9 @@ class MathToken:
     display: bool
 
 
-class MathRepairer(Protocol):
-    def repair_failed_formulas(self, failures: list[dict[str, Any]], warnings: list[str]) -> dict[str, str]:
-        ...
-
-
 class MathRenderer:
-    def __init__(self, output_dir: Path, repairer: MathRepairer | None = None):
+    def __init__(self, output_dir: Path):
         self.output_dir = output_dir
-        self.repairer = repairer
         self.helper_path = Path(__file__).parent / "node" / "math_render.mjs"
         self.cache: dict[MathToken, str] = {}
         self.dimensions: dict[MathToken, tuple[int, int]] = {}
@@ -54,26 +48,6 @@ class MathRenderer:
         failures: list[dict[str, Any]] = []
         if pending:
             failures = self._render_batch(pending, warnings)
-            if failures and self.repairer:
-                repairs = self.repairer.repair_failed_formulas(failures, warnings)
-                repaired_pending = []
-                for item in failures:
-                    repaired_latex = repairs.get(str(item["key"]))
-                    if repaired_latex:
-                        repaired_item = dict(item)
-                        repaired_item["latex"] = repaired_latex
-                        repaired_pending.append(repaired_item)
-                if repaired_pending:
-                    repaired_failures = self._render_batch(repaired_pending, warnings)
-                    repaired_failed_keys = {str(item.get("key")) for item in repaired_failures}
-                    repaired_count = len(repaired_pending) - len(repaired_failed_keys)
-                    if repaired_count:
-                        warnings.append(f"{repaired_count} formula(s) rendered after AI math repair.")
-                    failures = [
-                        item
-                        for item in failures
-                        if str(item.get("key")) not in repairs or str(item.get("key")) in repaired_failed_keys
-                    ]
 
         bundle = self._bundle_existing_outputs(unique_tokens)
         missing_count = len(unique_tokens) - len(bundle.manifest_items)
@@ -162,112 +136,6 @@ def collect_math_tokens(markdown_pages: Iterable[str]) -> list[MathToken]:
     for markdown in markdown_pages:
         rewrite_math(markdown, lambda token: tokens.append(token) or "")
     return tokens
-
-
-class MathMLRenderer:
-    def __init__(self, repairer: MathRepairer | None = None):
-        self.repairer = repairer
-        self.helper_path = Path(__file__).parent / "node" / "mathml_render.mjs"
-        self.cache: dict[MathToken, str] = {}
-
-    def render_many(self, tokens: Iterable[MathToken], warnings: list[str]) -> AssetBundle:
-        unique_tokens = list(dict.fromkeys(token for token in tokens if token.latex.strip()))
-        pending = [
-            {
-                "key": self._key(token),
-                "latex": token.latex,
-                "original_latex": token.latex,
-                "display": token.display,
-            }
-            for token in unique_tokens
-            if token not in self.cache
-        ]
-
-        failures: list[dict[str, Any]] = []
-        if pending:
-            failures = self._render_batch(pending, warnings)
-            if failures and self.repairer:
-                repairs = self.repairer.repair_failed_formulas(failures, warnings)
-                repaired_pending = []
-                for item in failures:
-                    repaired_latex = repairs.get(str(item["key"]))
-                    if repaired_latex:
-                        repaired_item = dict(item)
-                        repaired_item["latex"] = repaired_latex
-                        repaired_pending.append(repaired_item)
-                if repaired_pending:
-                    repaired_failures = self._render_batch(repaired_pending, warnings)
-                    repaired_failed_keys = {str(item.get("key")) for item in repaired_failures}
-                    repaired_count = len(repaired_pending) - len(repaired_failed_keys)
-                    if repaired_count:
-                        warnings.append(f"{repaired_count} formula(s) converted to MathML after AI math repair.")
-                    failures = [
-                        item
-                        for item in failures
-                        if str(item.get("key")) not in repairs or str(item.get("key")) in repaired_failed_keys
-                    ]
-
-        missing_count = sum(1 for token in unique_tokens if token not in self.cache)
-        if missing_count:
-            warnings.append(f"{missing_count} formula(s) could not be converted to MathML.")
-        return AssetBundle()
-
-    def _render_batch(self, formulas: list[dict[str, Any]], warnings: list[str]) -> list[dict[str, Any]]:
-        proc = subprocess.run(
-            ["node", str(self.helper_path)],
-            input=json.dumps({"formulas": formulas}),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            warnings.append(proc.stderr.strip() or "MathML conversion failed.")
-            return [dict(item, error=proc.stderr.strip() or "MathML conversion failed.") for item in formulas]
-
-        try:
-            result = json.loads(proc.stdout)
-        except json.JSONDecodeError:
-            warnings.append("MathML renderer returned invalid JSON.")
-            return [dict(item, error="MathML renderer returned invalid JSON.") for item in formulas]
-
-        source_by_key = {str(item["key"]): item for item in formulas}
-        failures = []
-        for item in result.get("results", []):
-            if not isinstance(item, dict):
-                continue
-            key = str(item.get("key") or "")
-            source = source_by_key.get(key)
-            if not source:
-                continue
-            token = MathToken(str(source.get("original_latex") or source["latex"]), bool(source["display"]))
-            if item.get("ok") and item.get("mathml"):
-                self.cache[token] = str(item["mathml"])
-            else:
-                failure = dict(source)
-                failure["error"] = str(item.get("error") or "MathML renderer did not return a success result.")
-                failures.append(failure)
-
-        rendered_keys = {self._key(token) for token in self.cache}
-        for item in formulas:
-            key = str(item["key"])
-            if key not in rendered_keys and all(str(failure["key"]) != key for failure in failures):
-                failures.append(dict(item, error="MathML renderer did not return a result."))
-        return failures
-
-    def html_for(self, token: MathToken) -> str:
-        mathml = self.cache.get(token)
-        alt = html.escape(token.latex, quote=True)
-        if not mathml:
-            if token.display:
-                return f'<pre class="math-source" role="math">{alt}</pre>'
-            return f'<span class="math-source" role="math">{alt}</span>'
-        if token.display:
-            return f'<div class="math-block mathml-block">{mathml}</div>'
-        return f'<span class="mathml-inline">{mathml}</span>'
-
-    def _key(self, token: MathToken) -> str:
-        payload = f"mathml-v1\0{'display' if token.display else 'inline'}\0{token.latex}".encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()[:24]
 
 
 def rewrite_math(markdown: str, replace: Callable[[MathToken], str]) -> str:

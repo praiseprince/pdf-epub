@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .conversion_options import DEFAULT_COMIC_LAYOUT, DEFAULT_COMIC_OUTPUT_FORMAT, DEFAULT_CONVERSION_MODE
-from .llm_options import DEFAULT_MATH_REPAIR_PROVIDER, math_repair_provider_label
 from .parser_options import DEFAULT_PARSER_MODEL, DEFAULT_PARSER_STRATEGY
 
 
@@ -34,7 +33,6 @@ class JobRecord:
     comic_layout: str
     parser_model: str
     parser_strategy: str
-    math_repair_provider: str
     include_snapshots: bool
     create_kepub: bool
     source_path: str
@@ -66,8 +64,6 @@ class JobRecord:
             "comic_layout": self.comic_layout,
             "parser_model": self.parser_model,
             "parser_strategy": self.parser_strategy,
-            "math_repair_provider": self.math_repair_provider,
-            "math_repair_label": math_repair_provider_label(self.math_repair_provider),
             "include_snapshots": self.include_snapshots,
             "has_output": bool(self.epub_path),
             "has_epub": bool(self.epub_path),
@@ -120,7 +116,6 @@ class JobStore:
                   comic_layout TEXT NOT NULL DEFAULT 'manga',
                   parser_model TEXT NOT NULL DEFAULT 'PaddleOCR-VL-1.6',
                   parser_strategy TEXT NOT NULL DEFAULT 'auto',
-                  math_repair_provider TEXT NOT NULL DEFAULT 'off',
                   include_snapshots INTEGER NOT NULL DEFAULT 1,
                   create_kepub INTEGER NOT NULL DEFAULT 0,
                   source_path TEXT NOT NULL,
@@ -166,12 +161,6 @@ class JobStore:
                 "parser_strategy",
                 f"TEXT NOT NULL DEFAULT '{DEFAULT_PARSER_STRATEGY}'",
             )
-            _ensure_column(
-                conn,
-                "jobs",
-                "math_repair_provider",
-                f"TEXT NOT NULL DEFAULT '{DEFAULT_MATH_REPAIR_PROVIDER}'",
-            )
 
     def create_job(
         self,
@@ -189,7 +178,6 @@ class JobStore:
         comic_layout: str = DEFAULT_COMIC_LAYOUT,
         parser_model: str = DEFAULT_PARSER_MODEL,
         parser_strategy: str = DEFAULT_PARSER_STRATEGY,
-        math_repair_provider: str = DEFAULT_MATH_REPAIR_PROVIDER,
     ) -> JobRecord:
         now = utc_now()
         with self.connect() as conn:
@@ -199,10 +187,10 @@ class JobStore:
                   id, source_filename, title, author, status, stage, message,
                   size_bytes, include_snapshots, create_kepub, conversion_mode,
                   comic_output_format, comic_layout, parser_model, parser_strategy,
-                  math_repair_provider, source_path, created_at, updated_at
+                  source_path, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, 'queued', 'Queued', 'Waiting for the local worker.',
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -217,7 +205,6 @@ class JobStore:
                     comic_layout,
                     parser_model,
                     parser_strategy,
-                    math_repair_provider,
                     str(source_path),
                     now,
                     now,
@@ -325,7 +312,6 @@ def _row_to_job(row: sqlite3.Row) -> JobRecord:
         comic_layout=row["comic_layout"],
         parser_model=row["parser_model"],
         parser_strategy=row["parser_strategy"],
-        math_repair_provider=row["math_repair_provider"],
         include_snapshots=bool(row["include_snapshots"]),
         create_kepub=bool(row["create_kepub"]),
         source_path=row["source_path"],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
 import subprocess
 import threading
 import time
@@ -48,6 +49,8 @@ class PaddleClient:
     ) -> dict[str, Any]:
         if self.settings.local_paddle_mode == "fixture":
             return self.fixture_result(file_path, page_count=page_count)
+        if self.settings.local_paddle_mode == "local":
+            raise PaddleClientError("Local PaddleOCR runs through rendered page OCR, not full-PDF submission.")
 
         if not self.settings.baidu_ai_studio_api_key:
             raise PaddleClientError("BAIDU_AI_STUDIO_API_KEY is not configured.")
@@ -234,7 +237,19 @@ class PaddleClient:
         on_page_start: Callable[[int, int, int], None],
         on_status: Callable[[int, int, dict[str, Any]], None],
         should_cancel: Callable[[], bool],
+        checkpoint_dir: Path | None = None,
     ) -> dict[str, Any]:
+        if self.settings.local_paddle_mode == "local":
+            if checkpoint_dir is None:
+                checkpoint_dir = page_paths[0].parent / "local-ocr-checkpoints" if page_paths else Path("local-ocr-checkpoints")
+            return self._parse_page_images_local(
+                page_paths,
+                on_page_start=on_page_start,
+                on_status=on_status,
+                should_cancel=should_cancel,
+                checkpoint_dir=checkpoint_dir,
+            )
+
         pages: list[dict[str, Any]] = []
         page_jobs: list[dict[str, Any]] = []
         total = len(page_paths)
@@ -283,6 +298,162 @@ class PaddleClient:
             "pages": pages,
             "dataInfo": {"strategy": "rendered_pages", "model": model, "pageJobs": page_jobs},
         }
+
+    def _parse_page_images_local(
+        self,
+        page_paths: list[Path],
+        *,
+        on_page_start: Callable[[int, int, int], None],
+        on_status: Callable[[int, int, dict[str, Any]], None],
+        should_cancel: Callable[[], bool],
+        checkpoint_dir: Path,
+    ) -> dict[str, Any]:
+        local_python = self.settings.local_paddle_python.expanduser()
+        if not local_python.is_absolute():
+            local_python = Path(__file__).resolve().parents[1] / local_python
+        if not local_python.exists():
+            raise PaddleClientError(
+                f"Local PaddleOCR Python was not found at {local_python}. "
+                "Run the local PaddleOCR setup first or set LOCAL_PADDLE_PYTHON."
+            )
+
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        total = len(page_paths)
+        pages_by_number: dict[int, dict[str, Any]] = {}
+        page_jobs: list[dict[str, Any]] = []
+        for page, checkpoint in _existing_checkpoints(checkpoint_dir, total).items():
+            pages_by_number[page] = checkpoint
+            page_jobs.append({"page": page, "source": "local_paddleocr", "cached": True})
+
+        missing_images = [
+            {"page": index, "path": str(path)}
+            for index, path in enumerate(page_paths, start=1)
+            if index not in pages_by_number
+        ]
+        if not missing_images:
+            return _local_result(pages_by_number, model=self.settings.paddle_model, page_jobs=page_jobs)
+
+        payload = {
+            "images": missing_images,
+            "checkpointDir": str(checkpoint_dir),
+            "pipelineVersion": self.settings.local_paddle_pipeline_version,
+            "device": self.settings.local_paddle_device,
+        }
+        runner = Path(__file__).parent / "local_paddle_runner.py"
+        proc = subprocess.Popen(
+            [str(local_python), str(runner)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        proc.stdin.write(json.dumps(payload))
+        proc.stdin.close()
+
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        logs: list[str] = []
+        active_page: int | None = None
+
+        try:
+            while True:
+                if should_cancel():
+                    proc.terminate()
+                    raise PaddleClientError("Job canceled before local PaddleOCR finished.")
+
+                events = selector.select(timeout=1.0)
+                for key, _mask in events:
+                    line = key.fileobj.readline()
+                    if line == "":
+                        continue
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith("__LOCAL_OCR_EVENT__"):
+                        event = json.loads(stripped.removeprefix("__LOCAL_OCR_EVENT__"))
+                        active_page = self._handle_local_event(
+                            event,
+                            total=total,
+                            pages_by_number=pages_by_number,
+                            page_jobs=page_jobs,
+                            on_page_start=on_page_start,
+                            on_status=on_status,
+                            active_page=active_page,
+                        )
+                    else:
+                        logs.append(stripped)
+                        logs = logs[-40:]
+
+                if proc.poll() is not None:
+                    remainder = proc.stdout.read()
+                    for line in remainder.splitlines():
+                        stripped = line.strip()
+                        if stripped:
+                            logs.append(stripped)
+                    break
+        finally:
+            selector.close()
+
+        if proc.returncode != 0:
+            detail = "\n".join(logs[-12:]).strip()
+            raise PaddleClientError(detail or f"Local PaddleOCR runner exited with code {proc.returncode}.")
+
+        return _local_result(pages_by_number, model=self.settings.paddle_model, page_jobs=page_jobs)
+
+    def _handle_local_event(
+        self,
+        event: dict[str, Any],
+        *,
+        total: int,
+        pages_by_number: dict[int, dict[str, Any]],
+        page_jobs: list[dict[str, Any]],
+        on_page_start: Callable[[int, int, int], None],
+        on_status: Callable[[int, int, dict[str, Any]], None],
+        active_page: int | None,
+    ) -> int | None:
+        name = str(event.get("event") or "")
+        if name == "model_loading":
+            on_status(1, 1, {"message": "Loading local PaddleOCR-VL model."})
+            return active_page
+        if name == "model_ready":
+            on_status(1, 1, {"message": "Local PaddleOCR-VL model is ready."})
+            return active_page
+        if name == "page_start":
+            page = int(event.get("page") or 1)
+            on_page_start(page, total, 1)
+            return page
+        if name == "page_done":
+            page = int(event.get("page") or active_page or 1)
+            checkpoint = Path(str(event.get("checkpoint") or ""))
+            if checkpoint.exists():
+                pages_by_number[page] = json.loads(checkpoint.read_text(encoding="utf-8"))
+            page_jobs.append(
+                {
+                    "page": page,
+                    "source": "local_paddleocr",
+                    "cached": bool(event.get("cached")),
+                    "elapsedSeconds": event.get("elapsedSeconds"),
+                }
+            )
+            on_status(
+                page,
+                1,
+                {
+                    "state": "done",
+                    "message": f"Local PaddleOCR finished page {page} of {total}.",
+                    "progress": {"extractedPages": 1},
+                },
+            )
+            return None
+        if name == "page_error":
+            page = int(event.get("page") or active_page or 1)
+            raise PaddleClientError(f"Local OCR failed on page {page}: {event.get('message')}")
+        if name == "error":
+            raise PaddleClientError(str(event.get("message") or "Local OCR failed."))
+        return active_page
 
     def fixture_result(self, pdf_path: Path, *, page_count: int | None = None) -> dict[str, Any]:
         pages = []
@@ -357,6 +528,35 @@ class PaddleClient:
 
 def _elapsed_seconds(started: float) -> float:
     return time.monotonic() - started
+
+
+def _existing_checkpoints(checkpoint_dir: Path, total: int) -> dict[int, dict[str, Any]]:
+    pages: dict[int, dict[str, Any]] = {}
+    for page in range(1, total + 1):
+        checkpoint = checkpoint_dir / f"page-{page:04d}.json"
+        if not checkpoint.exists():
+            continue
+        try:
+            data = json.loads(checkpoint.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            pages[page] = data
+    return pages
+
+
+def _local_result(
+    pages_by_number: dict[int, dict[str, Any]],
+    *,
+    model: ParserModel,
+    page_jobs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    pages = [pages_by_number[page] for page in sorted(pages_by_number)]
+    return {
+        "jobId": f"local-pages-{int(time.time())}",
+        "pages": pages,
+        "dataInfo": {"strategy": "local_rendered_pages", "model": model, "pageJobs": page_jobs},
+    }
 
 
 def _remaining_seconds(started: float, timeout_seconds: int | None) -> int | None:

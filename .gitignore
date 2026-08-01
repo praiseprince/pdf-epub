@@ -6,6 +6,7 @@
 .vercel/
 node_modules/
 .venv/
+.venv_paddleocr/
 data/
 __pycache__/
 *.py[cod]

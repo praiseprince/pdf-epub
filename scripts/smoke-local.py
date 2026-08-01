@@ -12,7 +12,6 @@ sys.path.insert(0, str(ROOT))
 
 from local_app.config import Settings
 from local_app.database import JobStore
-from local_app.llm_options import normalize_math_repair_provider
 from local_app.paths import ensure_data_dirs, job_upload_dir
 from local_app.pdf_tools import pdfinfo
 from local_app.worker import JobWorker
@@ -22,16 +21,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a local conversion smoke test against a real PDF.")
     parser.add_argument("--pdf", required=True, type=Path, help="Path to an existing real PDF.")
     parser.add_argument("--data-dir", type=Path, default=Path("tmp/local-smoke-data"))
-    parser.add_argument("--mode", choices=["fixture", "live"], default="fixture")
+    parser.add_argument("--mode", choices=["fixture", "live", "local"], default="local")
     parser.add_argument("--conversion-mode", choices=["document", "comic"], default="document")
     parser.add_argument("--comic-output-format", choices=["kepub", "epub", "cbz"], default="kepub")
     parser.add_argument("--comic-layout", choices=["manga", "comic", "webtoon"], default="webtoon")
-    parser.add_argument(
-        "--math-repair",
-        choices=["off", "gemini", "baidu", "gemini_baidu", "baidu_gemini"],
-        default="off",
-    )
     parser.add_argument("--snapshot-dpi", type=int, default=96)
+    parser.add_argument("--page-limit", type=int, default=0, help="Use only the first N pages for this test run.")
     parser.add_argument("--allow-small", action="store_true", help="Allow PDFs under 100 pages.")
     parser.add_argument("--epubcheck", action="store_true", help="Run EPUBCheck when EPUBCHECK_JAR is available.")
     parser.add_argument("--kepub", action="store_true", help="Also create and validate a .kepub.epub copy.")
@@ -48,7 +43,8 @@ def main() -> int:
 
     info = pdfinfo(source_pdf)
     pages = int(info.get("pages", 0) or 0)
-    if pages < 100 and not args.allow_small:
+    effective_pages = min(pages, args.page_limit) if args.page_limit > 0 else pages
+    if effective_pages < 100 and not args.allow_small:
         print(f"Smoke PDF has {pages} pages; use a 100+ page real PDF or pass --allow-small.", file=sys.stderr)
         return 1
 
@@ -74,7 +70,10 @@ def main() -> int:
     upload_dir = job_upload_dir(settings, job_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
     target_pdf = upload_dir / "source.pdf"
-    shutil.copy2(source_pdf, target_pdf)
+    if args.page_limit > 0 and pages > args.page_limit:
+        _copy_first_pages(source_pdf, target_pdf, args.page_limit)
+    else:
+        shutil.copy2(source_pdf, target_pdf)
 
     existing = store.maybe_get_job(job_id)
     if existing:
@@ -91,7 +90,6 @@ def main() -> int:
         conversion_mode=args.conversion_mode,
         comic_output_format=args.comic_output_format,
         comic_layout=args.comic_layout,
-        math_repair_provider=normalize_math_repair_provider(args.math_repair) if args.conversion_mode == "document" else "off",
         source_path=target_pdf,
     )
     worker._process_job(job.id)
@@ -141,6 +139,14 @@ def main() -> int:
             print(f"epubcheck skipped; jar not found at {jar}")
 
     return 0
+
+
+def _copy_first_pages(source_pdf: Path, target_pdf: Path, page_limit: int) -> None:
+    import fitz
+
+    with fitz.open(source_pdf) as source, fitz.open() as target:
+        target.insert_pdf(source, from_page=0, to_page=max(0, page_limit - 1))
+        target.save(target_pdf, garbage=4, deflate=True)
 
 
 if __name__ == "__main__":
