@@ -104,4 +104,6 @@ def test_epub_builder_renders_math_png_and_uses_first_pdf_page_as_cover(tmp_path
     assert "math-block" in chapter
     assert "page-snapshot" not in chapter
     assert "Cover page from source PDF" in cover_xhtml
+    assert "Converted from" not in cover_xhtml
+    assert "<h1>Math</h1>" not in cover_xhtml
     assert any(name.startswith("EPUB/assets/math/") and name.endswith(".png") for name in names)

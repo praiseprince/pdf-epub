@@ -271,20 +271,22 @@ def cover_document(
     warnings: list[str],
     cover_image_href: str | None,
 ) -> str:
+    if cover_image_href:
+        return xhtml_document(
+            title,
+            f"""<section epub:type="cover" class="cover-page">
+  <figure class="cover-image"><img src="../{_xml_attr(cover_image_href)}" alt="Cover page from source PDF" /></figure>
+</section>""",
+        )
+
     warning_items = "".join(f"<li>{_xml(warning)}</li>" for warning in warnings[:20])
     warning_block = f"<section><h2>Conversion notes</h2><ul>{warning_items}</ul></section>" if warning_items else ""
-    image = (
-        f'<figure class="cover-image"><img src="../{_xml_attr(cover_image_href)}" alt="Cover page from source PDF" /></figure>'
-        if cover_image_href
-        else ""
-    )
     return xhtml_document(
         title,
         f"""<section epub:type="cover">
   <h1>{_xml(title)}</h1>
   {f'<p>{_xml(author)}</p>' if author else ''}
   <p>Converted from {_xml(original_filename)}</p>
-  {image}
 </section>
 {warning_block}""",
     )
