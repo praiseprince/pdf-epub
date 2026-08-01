@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     create_kepub_default: bool = Field(False, alias="LOCAL_CREATE_KEPUB_DEFAULT")
     snapshot_dpi: int = Field(120, alias="LOCAL_SNAPSHOT_DPI")
     paddle_poll_seconds: float = Field(5.0, alias="LOCAL_PADDLE_POLL_SECONDS")
-    paddle_submit_timeout_seconds: int = Field(120, alias="LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS")
+    paddle_submit_timeout_seconds: int = Field(300, alias="LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS")
     paddle_page_submit_timeout_seconds: int = Field(120, alias="LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS")
     paddle_page_submit_retries: int = Field(2, alias="LOCAL_PADDLE_PAGE_SUBMIT_RETRIES")
     worker_poll_seconds: float = Field(1.0, alias="LOCAL_WORKER_POLL_SECONDS")

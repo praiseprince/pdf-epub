@@ -231,3 +231,150 @@ def test_epub_builder_can_emit_mathml_for_kepub_path(tmp_path: Path) -> None:
     assert "<img" not in chapter
     assert 'properties="mathml"' in package
     assert not any(name.startswith("EPUB/assets/math/") and name.endswith(".png") for name in names)
+
+
+def test_epub_builder_preserves_chart_figure_crop_and_removes_axis_tables(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": """
+Before the figure.
+
+<table><tr><th>Input/Hidden/Output</th><th>Depth</th></tr><tr><td>-1</td><td>2</td></tr></table>
+
+<table><tr><th>Input/Hidden/Output</th><th>Depth</th></tr><tr><td>0</td><td>3</td></tr></table>
+
+<div style="text-align: center;">Figure 1: A residual network and an ODE network.</div>
+
+After the figure.
+""",
+                "markdownImages": {},
+                "outputImages": {},
+                "prunedResult": {
+                    "width": 100,
+                    "height": 100,
+                    "parsing_res_list": [
+                        {
+                            "block_label": "text",
+                            "block_bbox": [0, 10, 8, 46],
+                            "block_content": "Neighbor text",
+                        },
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [10, 10, 42, 46],
+                            "block_content": "Input/Hidden/Output | Depth",
+                        },
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [52, 12, 90, 46],
+                            "block_content": "Input/Hidden/Output | Depth",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [10, 54, 90, 70],
+                            "block_content": "Figure 1: A residual network and an ODE network.",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    page_image = Image.new("RGB", (100, 100), "white")
+    for x in range(0, 8):
+        for y in range(10, 46):
+            page_image.putpixel((x, y), (200, 0, 0))
+    for x in range(10, 90):
+        for y in range(10, 46):
+            page_image.putpixel((x, y), (20, 80, 160))
+    page_image.save(pages_dir / "page-01.png")
+    assets_dir = tmp_path / "assets"
+
+    result = build_epub(
+        output_path=tmp_path / "figures.epub",
+        title="Figures",
+        author="",
+        original_filename="figures.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=pages_dir,
+        assets_source_dir=assets_dir,
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+        names = epub.namelist()
+        crop_name = "EPUB/assets/figure-crops/page-0001-figure-01.png"
+        crop = epub.read(crop_name)
+
+    assert "preserved-figure" in chapter
+    assert "Figure 1: A residual network" in chapter
+    assert "Input/Hidden/Output" not in chapter
+    assert crop_name in names
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(crop)
+    with Image.open(crop_path) as image:
+        assert image.width >= 80
+        assert image.height == 50
+        assert image.getpixel((0, 20)) == (20, 80, 160)
+
+
+def test_epub_builder_does_not_strip_tables_without_plausible_figure_crop(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": """
+Before the table.
+
+<table><tr><th>Only table data</th></tr><tr><td>42</td></tr></table>
+
+<div style="text-align: center;">Figure 2: A very small detected artifact.</div>
+""",
+                "markdownImages": {},
+                "outputImages": {},
+                "prunedResult": {
+                    "width": 1000,
+                    "height": 1000,
+                    "parsing_res_list": [
+                        {
+                            "block_label": "table",
+                            "block_bbox": [500, 500, 540, 530],
+                            "block_content": "Only table data",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [480, 550, 760, 580],
+                            "block_content": "Figure 2: A very small detected artifact.",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    Image.new("RGB", (1000, 1000), "white").save(pages_dir / "page-01.png")
+
+    result = build_epub(
+        output_path=tmp_path / "table-only.epub",
+        title="Table only",
+        author="",
+        original_filename="table-only.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=pages_dir,
+        assets_source_dir=tmp_path / "assets",
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+        names = epub.namelist()
+
+    assert "preserved-figure" not in chapter
+    assert "Only table data" in chapter
+    assert not any(name.startswith("EPUB/assets/figure-crops/") for name in names)

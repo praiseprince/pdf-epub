@@ -75,7 +75,7 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.1-flash-lite
 BAIDU_AI_STUDIO_MODEL=ernie-4.5-turbo-128k
 LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
-LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=120
+LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=300
 LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_RETRIES=2
 LOCAL_MATH_REPAIR_PROVIDER=off
@@ -236,7 +236,8 @@ while the local worker keeps running.
 OCR timeout controls:
 
 - `LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS`: how long to wait for Baidu to accept a
-  full-PDF upload before Auto retry switches to rendered pages.
+  full-PDF upload before Auto retry switches to rendered pages. Default: 300
+  seconds.
 - `LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS`: how long each rendered page upload
   can take.
 - `LOCAL_PADDLE_PAGE_SUBMIT_RETRIES`: rendered-page upload attempts per page.

@@ -14,7 +14,7 @@ from .conversion_options import (
     normalize_conversion_mode,
 )
 from .database import JobRecord, JobStore, utc_now
-from .epub_builder import build_epub, write_raw_result
+from .epub_builder import build_epub, figure_crop_page_numbers, write_raw_result
 from .llm_repair import MathRepairClient
 from .parser_options import ParserModel, normalize_parser_model, normalize_parser_strategy
 from .paths import job_dirs, job_epub_dir, job_ocr_dir, job_pages_dir
@@ -164,6 +164,8 @@ class JobWorker:
             except PaddleClientError as exc:
                 raise RuntimeError(f"Baidu OCR failed after retries: {exc}") from exc
 
+            self._check_cancel(job_id)
+            self._render_figure_crop_pages(job_id, source_path, raw_result)
             self._check_cancel(job_id)
             message = "Building EPUB from OCR text, figures, and rendered formulas."
             self.store.update_job(job_id, stage="Building EPUB", message=message)
@@ -367,6 +369,34 @@ class JobWorker:
         )
         return result
 
+    def _render_figure_crop_pages(self, job_id: str, source_path: Path, raw_result: dict[str, Any]) -> None:
+        figure_pages = sorted(figure_crop_page_numbers(raw_result))
+        if not figure_pages:
+            return
+
+        pages_dir = job_pages_dir(self.settings, job_id)
+        missing_pages = [page for page in figure_pages if not _rendered_page_exists(pages_dir, page)]
+        if not missing_pages:
+            return
+
+        self.store.update_job(
+            job_id,
+            stage="Rendering figure crops",
+            message="Rendering source PDF pages that contain diagrams or charts.",
+            progress_done=0,
+            progress_total=len(missing_pages),
+        )
+        for done, page_number in enumerate(missing_pages, start=1):
+            self._check_cancel(job_id)
+            render_pdf_pages(
+                source_path,
+                pages_dir,
+                dpi=self.settings.snapshot_dpi,
+                first_page=page_number,
+                last_page=page_number,
+            )
+            self.store.update_job(job_id, progress_done=done)
+
     def _process_comic_job(self, job: JobRecord, source_path: Path, *, pages: int) -> None:
         output_format = normalize_comic_output_format(job.comic_output_format)
         layout = normalize_comic_layout(job.comic_layout)
@@ -431,3 +461,14 @@ class JobWorker:
 def delete_job_files(settings: Settings, job_id: str) -> None:
     for path in job_dirs(settings, job_id):
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _rendered_page_exists(directory: Path, page_number: int) -> bool:
+    for candidate in (directory / f"page-{page_number:02d}.png", directory / f"page-{page_number}.png"):
+        if candidate.exists():
+            return True
+    for candidate in directory.glob("page-*.png"):
+        suffix = candidate.stem.rsplit("-", 1)[-1]
+        if suffix.isdigit() and int(suffix) == page_number:
+            return True
+    return False
