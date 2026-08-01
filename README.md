@@ -21,10 +21,9 @@ legacy Next.js source tree, but the supported path in this branch is local-first
   OCR if Baidu does not accept the PDF upload promptly
 - EPUB builder that preserves OCR Markdown, sanitized raw HTML tables/figures,
   Paddle image assets, and rendered PNG formula images
-- The first PDF page is used as the EPUB cover image; full PDF-page chapters are
-  only used as a fallback when OCR fails
+- The first PDF page is used as the EPUB cover image; PDF page screenshots are
+  not used as EPUB content
 - Download, cancel, retry, and delete controls for each saved job
-- Visual fallback EPUB when Paddle parsing fails but local page rendering works
 - Optional `.kepub.epub` copy for Kobo stock-reader testing
 
 ## Privacy
@@ -107,7 +106,9 @@ During Baidu submission, progress can only include a remote `paddle_job_id`
 after Baidu accepts the upload. To avoid jobs looking frozen at `0/N`, the app
 now shows the specific stage: full-PDF submit, rendered-page submit, or remote
 page OCR. In Auto retry mode, a full-PDF submit timeout switches to rendered
-page-by-page OCR before falling back to visual page images.
+page-by-page OCR. If OCR still fails after retries, the job fails clearly; use
+the original PDF in Kobo, KOReader, or another PDF reader when you want visual
+page fidelity.
 
 Job files live here:
 
@@ -161,9 +162,9 @@ timeouts. Defaults are aligned to PaddleOCR async document parsing constraints:
 - `MAX_IMAGE_SIZE_MB=256`
 - `MAX_TOTAL_ASSET_MB=1024`
 
-For a 100-page PDF, conversion time depends mostly on Baidu queue time and local
-page-image rendering. The browser can be closed while the local worker keeps
-running.
+For a 100-page PDF, conversion time depends mostly on Baidu queue time and, when
+needed, local page-image rendering for OCR input. The browser can be closed
+while the local worker keeps running.
 
 OCR timeout controls:
 

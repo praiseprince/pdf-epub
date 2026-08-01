@@ -78,10 +78,8 @@ class JobWorker:
         )
 
         cover_snapshot_paths: list[Path] = []
-        fallback_snapshot_paths: list[Path] = []
         raw_result: dict[str, Any] | None = None
         raw_result_path: Path | None = None
-        parse_error: str | None = None
         ocr_notes: list[str] = []
 
         try:
@@ -146,30 +144,16 @@ class JobWorker:
                     on_full_status=on_paddle_status,
                     ocr_notes=ocr_notes,
                 )
+                if not raw_result.get("pages"):
+                    raise RuntimeError("Baidu OCR returned no pages.")
                 raw_result_path = job_ocr_dir(self.settings, job_id) / "raw-result.json"
                 write_raw_result(raw_result_path, raw_result)
                 self.store.update_job(job_id, raw_result_path=raw_result_path)
             except PaddleClientError as exc:
-                parse_error = str(exc)
-                if job.include_snapshots and self.settings.include_page_snapshots:
-                    self.store.update_job(
-                        job_id,
-                        stage="Rendering fallback pages",
-                        message="OCR failed after retries. Rendering every page for a visual fallback EPUB.",
-                        progress_done=0,
-                        progress_total=pages,
-                    )
-                    pages_dir = job_pages_dir(self.settings, job_id)
-                    shutil.rmtree(pages_dir, ignore_errors=True)
-                    fallback_snapshot_paths = render_pdf_pages(source_path, pages_dir, dpi=self.settings.snapshot_dpi)
-                    self.store.update_job(job_id, progress_done=len(fallback_snapshot_paths))
-                if not fallback_snapshot_paths:
-                    raise RuntimeError(parse_error) from exc
+                raise RuntimeError(f"Baidu OCR failed after retries: {exc}") from exc
 
             self._check_cancel(job_id)
             message = "Building EPUB from OCR text, figures, and rendered formulas."
-            if parse_error:
-                message = "OCR failed, so building a visual fallback EPUB from PDF page images."
             self.store.update_job(job_id, stage="Building EPUB", message=message)
 
             ocr_assets_dir = job_ocr_dir(self.settings, job_id) / "assets"
@@ -179,12 +163,10 @@ class JobWorker:
                 max_image_bytes=self.settings.max_image_size_bytes,
                 max_total_bytes=self.settings.max_total_asset_bytes,
             )
-            build_snapshot_paths = fallback_snapshot_paths if parse_error else cover_snapshot_paths
+            build_snapshot_paths = cover_snapshot_paths
             page_bundle = add_page_snapshots(build_snapshot_paths)
             bundle = merge_bundles(ocr_bundle, page_bundle)
             bundle.warnings.extend(ocr_notes)
-            if parse_error:
-                bundle.warnings.append(f"PaddleOCR failed: {parse_error}")
 
             output_path = job_epub_dir(self.settings, job_id) / f"{Path(job.source_filename).stem}.epub"
             build_result = build_epub(
@@ -203,9 +185,7 @@ class JobWorker:
                 shutil.copyfile(output_path, kepub_path)
 
             final_message = "EPUB is ready."
-            if parse_error:
-                final_message = "EPUB is ready using visual fallback pages because OCR failed."
-            elif ocr_notes:
+            if ocr_notes:
                 final_message = f"EPUB is ready with {len(ocr_notes)} Baidu retry note(s)."
             elif build_result.warnings:
                 final_message = f"EPUB is ready with {len(build_result.warnings)} conversion note(s)."
@@ -216,7 +196,7 @@ class JobWorker:
                 stage="Ready to download",
                 message=final_message,
                 epub_path=build_result.output_path,
-                error=parse_error,
+                error=None,
                 progress_done=pages,
                 progress_total=pages,
                 finished_at=utc_now(),
