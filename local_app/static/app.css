@@ -143,6 +143,21 @@ input[type="text"] {
   width: 100%;
 }
 
+.check-row {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  flex-direction: row;
+  font-weight: 700;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.check-row input {
+  block-size: 20px;
+  inline-size: 20px;
+}
+
 .topbar {
   align-items: center;
   border-bottom: 1px solid var(--line);

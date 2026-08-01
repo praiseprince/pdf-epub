@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     max_total_asset_mb: int = Field(1024, alias="MAX_TOTAL_ASSET_MB")
 
     include_page_snapshots: bool = Field(True, alias="LOCAL_INCLUDE_PAGE_SNAPSHOTS")
+    create_kepub_default: bool = Field(False, alias="LOCAL_CREATE_KEPUB_DEFAULT")
     snapshot_dpi: int = Field(120, alias="LOCAL_SNAPSHOT_DPI")
     paddle_poll_seconds: float = Field(5.0, alias="LOCAL_PADDLE_POLL_SECONDS")
     worker_poll_seconds: float = Field(1.0, alias="LOCAL_WORKER_POLL_SECONDS")

@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--snapshot-dpi", type=int, default=96)
     parser.add_argument("--allow-small", action="store_true", help="Allow PDFs under 100 pages.")
     parser.add_argument("--epubcheck", action="store_true", help="Run EPUBCheck when EPUBCHECK_JAR is available.")
+    parser.add_argument("--kepub", action="store_true", help="Also create and validate a .kepub.epub copy.")
     parser.add_argument("--fresh", action="store_true", help="Clear the smoke-test data directory first.")
     return parser.parse_args()
 
@@ -77,6 +78,7 @@ def main() -> int:
         author="",
         size_bytes=source_pdf.stat().st_size,
         include_snapshots=True,
+        create_kepub=args.kepub,
         source_path=target_pdf,
     )
     worker._process_job(job.id)
@@ -95,6 +97,9 @@ def main() -> int:
 
     epub_path = Path(finished.epub_path)
     print(f"epub={epub_path}")
+    kepub_path = epub_path.with_name(f"{epub_path.stem}.kepub.epub")
+    if kepub_path.exists():
+        print(f"kepub={kepub_path}")
     print(f"epub_size={epub_path.stat().st_size}")
     with zipfile.ZipFile(epub_path) as epub:
         first = epub.namelist()[0]
@@ -108,6 +113,8 @@ def main() -> int:
         jar = settings.epubcheck_jar or Path("tmp/epubcheck-5.3.0/epubcheck.jar").resolve()
         if jar.exists():
             subprocess.run(["java", "-jar", str(jar), str(epub_path)], check=True)
+            if kepub_path.exists():
+                subprocess.run(["java", "-jar", str(jar), str(kepub_path)], check=True)
         else:
             print(f"epubcheck skipped; jar not found at {jar}")
 

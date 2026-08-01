@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from markdown_it import MarkdownIt
 
 from .assets import AssetBundle, normalize_asset_key
+from .math_render import MathRenderer, collect_math_tokens, rewrite_math
 
 
 @dataclass
@@ -39,8 +40,10 @@ figcaption { font-size: 0.9em; line-height: 1.35; margin-top: 0.4em; }
 .page-snapshot { margin: 0 0 1.2em; }
 .page-snapshot img { width: 100%; max-width: 100%; }
 .ocr-text { border-top: 1px solid #aaa; margin-top: 1em; padding-top: 0.8em; }
-.math, .math-display { font-family: serif; white-space: pre-wrap; }
-.math-display { display: block; text-align: center; margin: 1em 0; }
+.math-inline { display: inline; margin: 0 0.08em; vertical-align: -0.28em; max-height: 1.7em; }
+.math-block { text-align: center; overflow-x: auto; margin: 1em 0; }
+.math-block img { display: inline-block; max-width: 100%; }
+.math-source { font-family: serif; white-space: pre-wrap; }
 table { border-collapse: collapse; width: 100%; max-width: 100%; margin: 1em 0; font-size: 0.92em; }
 th, td { border: 1px solid #999; padding: 0.3em 0.45em; vertical-align: top; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0.75em; border: 1px solid #aaa; }
@@ -117,8 +120,17 @@ def build_epub(
     author = _clean_text(author)
 
     pages = _result_pages(raw_result)
-    max_pages = max(len(snapshot_paths), len(pages), 1)
+    markdown_pages = [str(page.get("markdownText", "")) for page in pages]
+    math_renderer = MathRenderer(assets_source_dir / "math")
+    math_bundle = math_renderer.render_many(collect_math_tokens(markdown_pages), warnings)
+    bundle.image_map.update(math_bundle.image_map)
+    bundle.manifest_items.update(math_bundle.manifest_items)
+    bundle.warnings.extend(math_bundle.warnings)
+
+    fallback_to_page_images = not pages and bool(snapshot_paths)
+    max_pages = max(len(pages), len(snapshot_paths) if fallback_to_page_images else 0, 1)
     chapters: list[dict[str, str]] = []
+    cover_image_href = bundle.image_map.get("page:1")
 
     for index in range(max_pages):
         page_number = index + 1
@@ -126,14 +138,14 @@ def build_epub(
         body_parts = [f'<section class="page" id="page-{page_number}">', f"<h2>Page {page_number}</h2>"]
 
         snapshot_href = bundle.image_map.get(f"page:{page_number}")
-        if snapshot_href:
+        if fallback_to_page_images and snapshot_href:
             body_parts.append(
                 '<figure class="page-snapshot">'
                 f'<img src="../{_xml_attr(snapshot_href)}" alt="Original page {page_number}" />'
                 "</figure>"
             )
 
-        rendered = render_markdown_fragment(markdown, bundle.image_map, warnings)
+        rendered = render_markdown_fragment(markdown, bundle.image_map, math_renderer, warnings)
         if rendered:
             body_parts.append(f'<section class="ocr-text">{rendered}</section>')
         elif not snapshot_href:
@@ -153,10 +165,18 @@ def build_epub(
     entries: list[tuple[str, bytes | str, int]] = [
         ("mimetype", "application/epub+zip", zipfile.ZIP_STORED),
         ("META-INF/container.xml", container_xml(), zipfile.ZIP_DEFLATED),
-        ("EPUB/package.opf", package_document(title, author, original_filename, chapters, bundle), zipfile.ZIP_DEFLATED),
+        (
+            "EPUB/package.opf",
+            package_document(title, author, original_filename, chapters, bundle, cover_image_href),
+            zipfile.ZIP_DEFLATED,
+        ),
         ("EPUB/nav.xhtml", nav_document(title, chapters), zipfile.ZIP_DEFLATED),
         ("EPUB/styles/book.css", BOOK_CSS, zipfile.ZIP_DEFLATED),
-        ("EPUB/text/cover.xhtml", cover_document(title, author, original_filename, warnings), zipfile.ZIP_DEFLATED),
+        (
+            "EPUB/text/cover.xhtml",
+            cover_document(title, author, original_filename, warnings, cover_image_href),
+            zipfile.ZIP_DEFLATED,
+        ),
     ]
 
     for chapter in chapters:
@@ -168,7 +188,7 @@ def build_epub(
     for href in sorted(bundle.manifest_items):
         if not href.startswith("assets/"):
             continue
-        asset_path = assets_source_dir / Path(href).name
+        asset_path = assets_source_dir / Path(href).relative_to("assets")
         if asset_path.exists():
             entries.append((f"EPUB/{href}", asset_path.read_bytes(), zipfile.ZIP_DEFLATED))
         else:
@@ -182,11 +202,17 @@ def build_epub(
     return EpubBuildResult(output_path=output_path, warnings=warnings)
 
 
-def render_markdown_fragment(markdown: str, image_map: dict[str, str], warnings: list[str]) -> str:
+def render_markdown_fragment(
+    markdown: str,
+    image_map: dict[str, str],
+    math_renderer: MathRenderer,
+    warnings: list[str],
+) -> str:
     if not markdown.strip():
         return ""
 
-    prepared = _rewrite_markdown_image_refs(markdown, image_map)
+    prepared = rewrite_math(markdown, math_renderer.html_for)
+    prepared = _rewrite_markdown_image_refs(prepared, image_map)
     rendered = MD.render(prepared)
     cleaned = bleach.clean(
         rendered,
@@ -199,6 +225,10 @@ def render_markdown_fragment(markdown: str, image_map: dict[str, str], warnings:
 
     for img in soup.find_all("img"):
         src = str(img.get("src", "")).strip()
+        if src.startswith("../assets/") or src.startswith("../pages/"):
+            if not img.get("alt"):
+                img["alt"] = "Document image"
+            continue
         href = _resolve_image_href(src, image_map)
         if href:
             img["src"] = f"../{href}"
@@ -234,15 +264,27 @@ def xhtml_document(title: str, body: str) -> str:
 </html>"""
 
 
-def cover_document(title: str, author: str, original_filename: str, warnings: list[str]) -> str:
+def cover_document(
+    title: str,
+    author: str,
+    original_filename: str,
+    warnings: list[str],
+    cover_image_href: str | None,
+) -> str:
     warning_items = "".join(f"<li>{_xml(warning)}</li>" for warning in warnings[:20])
     warning_block = f"<section><h2>Conversion notes</h2><ul>{warning_items}</ul></section>" if warning_items else ""
+    image = (
+        f'<figure class="cover-image"><img src="../{_xml_attr(cover_image_href)}" alt="Cover page from source PDF" /></figure>'
+        if cover_image_href
+        else ""
+    )
     return xhtml_document(
         title,
         f"""<section epub:type="cover">
   <h1>{_xml(title)}</h1>
   {f'<p>{_xml(author)}</p>' if author else ''}
   <p>Converted from {_xml(original_filename)}</p>
+  {image}
 </section>
 {warning_block}""",
     )
@@ -271,6 +313,7 @@ def package_document(
     original_filename: str,
     chapters: list[dict[str, str]],
     bundle: AssetBundle,
+    cover_image_href: str | None,
 ) -> str:
     modified = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     identifier = f"urn:uuid:{uuid.uuid4()}"
@@ -281,8 +324,14 @@ def package_document(
     spine = "\n".join(f'<itemref idref="{_xml_attr(chapter["id"])}" />' for chapter in chapters)
     resources = []
     for index, (href, mime) in enumerate(sorted(bundle.manifest_items.items()), start=1):
-        resources.append(f'<item id="res-{index}" href="{_xml_attr(href)}" media-type="{_xml_attr(mime)}" />')
+        if href == cover_image_href:
+            resources.append(
+                f'<item id="cover-image" href="{_xml_attr(href)}" media-type="{_xml_attr(mime)}" properties="cover-image" />'
+            )
+        else:
+            resources.append(f'<item id="res-{index}" href="{_xml_attr(href)}" media-type="{_xml_attr(mime)}" />')
     resource_items = "\n".join(resources)
+    cover_meta = '<meta name="cover" content="cover-image" />' if cover_image_href else ""
 
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
@@ -292,6 +341,7 @@ def package_document(
     {f'<dc:creator>{_xml(author)}</dc:creator>' if author else ''}
     <dc:language>en</dc:language>
     <dc:source>{_xml(original_filename)}</dc:source>
+    {cover_meta}
     <meta property="dcterms:modified">{_xml(modified)}</meta>
   </metadata>
   <manifest>

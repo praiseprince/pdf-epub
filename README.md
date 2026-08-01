@@ -16,9 +16,12 @@ legacy Next.js source tree, but the supported path in this branch is local-first
 - Local file storage for uploads, raw OCR JSON, page images, EPUBs, and logs
 - Baidu PaddleOCR-VL-1.6 document parsing through the official TypeScript SDK
 - EPUB builder that preserves OCR Markdown, sanitized raw HTML tables/figures,
-  Paddle image assets, and full PDF page snapshots as a visual safety layer
+  Paddle image assets, and rendered PNG formula images
+- The first PDF page is used as the EPUB cover image; full PDF-page chapters are
+  only used as a fallback when OCR fails
 - Download, cancel, retry, and delete controls for each saved job
 - Visual fallback EPUB when Paddle parsing fails but local page rendering works
+- Optional `.kepub.epub` copy for Kobo stock-reader testing
 
 ## Privacy
 
@@ -103,6 +106,22 @@ data/
 
 Use Delete in the app to remove a job and its local files.
 
+## Math And Kobo
+
+The default math strategy is PNG-first:
+
+- Baidu/Paddle TeX snippets such as `$N = 6$` are rendered locally with MathJax
+  and Sharp.
+- The rendered PNG is embedded inline or as a display equation.
+- The original TeX is preserved in the image `alt` text.
+- The `.kepub.epub` checkbox creates a second file with Kobo's sideload
+  extension so you can test Kobo's stock renderer on the Clara Colour.
+
+Kobo's public EPUB spec says MathML is supported on Kobo eInk readers and that
+using `.kepub.epub` invokes Kobo's WebKit-based reader path. KOReader is still
+best treated as uneven for MathML, so the converter does not depend on MathML
+rendering for readability.
+
 ## Limits
 
 The local app does not inherit Vercel request, response, function, or Blob
@@ -149,7 +168,9 @@ Small live Baidu smoke test:
 python scripts/smoke-local.py \
   --pdf testsets/pdfs/attention-all-you-need.pdf \
   --mode live \
-  --allow-small
+  --allow-small \
+  --kepub \
+  --epubcheck
 ```
 
 ## Development

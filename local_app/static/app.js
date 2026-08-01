@@ -92,8 +92,14 @@ function renderJobs(jobs) {
     if (job.has_epub) {
       const download = document.createElement("a");
       download.href = `/api/jobs/${job.id}/download`;
-      download.textContent = "Download";
+      download.textContent = "EPUB";
       actions.append(download);
+    }
+    if (job.has_kepub) {
+      const kepub = document.createElement("a");
+      kepub.href = `/api/jobs/${job.id}/download/kepub`;
+      kepub.textContent = "KEPUB";
+      actions.append(kepub);
     }
     if (job.status === "queued" || job.status === "running") {
       actions.append(actionButton("Cancel", "secondary", () => postAction(job.id, "cancel")));

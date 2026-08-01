@@ -4,7 +4,7 @@ import base64
 import zipfile
 from pathlib import Path
 
-from local_app.assets import collect_paddle_assets
+from local_app.assets import add_page_snapshots, collect_paddle_assets, merge_bundles
 from local_app.epub_builder import build_epub
 
 
@@ -62,3 +62,46 @@ def test_epub_builder_preserves_raw_html_images_and_tables(tmp_path: Path) -> No
     assert 'width="100%"' not in chapter
     assert "../assets/" in chapter
     assert any(name.startswith("EPUB/assets/") for name in names)
+
+
+def test_epub_builder_renders_math_png_and_uses_first_pdf_page_as_cover(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": "Encoder depth is $N = 6$.\n\n$$Attention(Q,K,V)=softmax(QK^T)V$$",
+                "markdownImages": {},
+                "outputImages": {},
+            }
+        ],
+    }
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    cover = pages_dir / "page-01.png"
+    cover.write_bytes(base64.b64decode(ONE_PIXEL_PNG))
+    assets_dir = tmp_path / "assets"
+    bundle = merge_bundles(add_page_snapshots([cover]))
+
+    result = build_epub(
+        output_path=tmp_path / "math.epub",
+        title="Math",
+        author="",
+        original_filename="math.pdf",
+        raw_result=raw_result,
+        bundle=bundle,
+        snapshot_paths=[cover],
+        snapshot_source_dir=pages_dir,
+        assets_source_dir=assets_dir,
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+        cover_xhtml = epub.read("EPUB/text/cover.xhtml").decode("utf-8")
+        names = epub.namelist()
+
+    assert "$N = 6$" not in chapter
+    assert "math-inline" in chapter
+    assert "math-block" in chapter
+    assert "page-snapshot" not in chapter
+    assert "Cover page from source PDF" in cover_xhtml
+    assert any(name.startswith("EPUB/assets/math/") and name.endswith(".png") for name in names)

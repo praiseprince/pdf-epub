@@ -17,6 +17,7 @@ def test_job_store_persists_running_job(tmp_path: Path) -> None:
         author="A. Author",
         size_bytes=source.stat().st_size,
         include_snapshots=True,
+        create_kepub=True,
         source_path=source,
     )
     store.update_job(created.id, status="running", stage="Reading document")
@@ -26,3 +27,4 @@ def test_job_store_persists_running_job(tmp_path: Path) -> None:
 
     assert [job.id for job in resumed] == ["job-1"]
     assert resumed[0].stage == "Reading document"
+    assert resumed[0].create_kepub is True

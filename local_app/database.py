@@ -26,6 +26,7 @@ class JobRecord:
     size_bytes: int
     paddle_job_id: str | None
     include_snapshots: bool
+    create_kepub: bool
     source_path: str
     raw_result_path: str | None
     epub_path: str | None
@@ -52,6 +53,8 @@ class JobRecord:
             "paddle_job_id": self.paddle_job_id,
             "include_snapshots": self.include_snapshots,
             "has_epub": bool(self.epub_path),
+            "create_kepub": self.create_kepub,
+            "has_kepub": bool(self.epub_path and _kepub_path(self.epub_path).exists()),
             "error": self.error,
             "cancel_requested": self.cancel_requested,
             "created_at": self.created_at,
@@ -92,6 +95,7 @@ class JobStore:
                   size_bytes INTEGER NOT NULL DEFAULT 0,
                   paddle_job_id TEXT,
                   include_snapshots INTEGER NOT NULL DEFAULT 1,
+                  create_kepub INTEGER NOT NULL DEFAULT 0,
                   source_path TEXT NOT NULL,
                   raw_result_path TEXT,
                   epub_path TEXT,
@@ -104,6 +108,7 @@ class JobStore:
                 )
                 """
             )
+            _ensure_column(conn, "jobs", "create_kepub", "INTEGER NOT NULL DEFAULT 0")
 
     def create_job(
         self,
@@ -114,6 +119,7 @@ class JobStore:
         author: str,
         size_bytes: int,
         include_snapshots: bool,
+        create_kepub: bool,
         source_path: Path,
     ) -> JobRecord:
         now = utc_now()
@@ -122,10 +128,10 @@ class JobStore:
                 """
                 INSERT INTO jobs (
                   id, source_filename, title, author, status, stage, message,
-                  size_bytes, include_snapshots, source_path, created_at, updated_at
+                  size_bytes, include_snapshots, create_kepub, source_path, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, 'queued', 'Queued', 'Waiting for the local worker.',
-                        ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -134,6 +140,7 @@ class JobStore:
                     author,
                     size_bytes,
                     1 if include_snapshots else 0,
+                    1 if create_kepub else 0,
                     str(source_path),
                     now,
                     now,
@@ -237,6 +244,7 @@ def _row_to_job(row: sqlite3.Row) -> JobRecord:
         size_bytes=row["size_bytes"],
         paddle_job_id=row["paddle_job_id"],
         include_snapshots=bool(row["include_snapshots"]),
+        create_kepub=bool(row["create_kepub"]),
         source_path=row["source_path"],
         raw_result_path=row["raw_result_path"],
         epub_path=row["epub_path"],
@@ -251,3 +259,14 @@ def _row_to_job(row: sqlite3.Row) -> JobRecord:
 
 def serialize_jobs(jobs: Iterable[JobRecord]) -> list[dict[str, Any]]:
     return [job.to_dict() for job in jobs]
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _kepub_path(epub_path: str) -> Path:
+    path = Path(epub_path)
+    return path.with_name(f"{path.stem}.kepub.epub")

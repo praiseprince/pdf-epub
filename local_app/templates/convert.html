@@ -35,6 +35,10 @@
               <input id="author" name="author" type="text" maxlength="200">
             </label>
           </div>
+          <label class="check-row">
+            <input name="create_kepub" type="checkbox" value="true" {% if create_kepub_default %}checked{% endif %}>
+            Create Kobo .kepub.epub copy
+          </label>
           <div class="form-row">
             <button type="submit">Convert to EPUB</button>
             <span class="limits">{{ max_pdf_size_mb }} MB / {{ max_pdf_pages }} pages · {{ paddle_mode }} parser</span>

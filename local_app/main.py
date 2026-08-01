@@ -111,6 +111,7 @@ async def convert_page(request: Request, settings: Settings = Depends(settings_d
             "max_pdf_size_mb": settings.max_pdf_size_mb,
             "max_pdf_pages": settings.max_pdf_pages,
             "paddle_mode": settings.local_paddle_mode,
+            "create_kepub_default": settings.create_kepub_default,
         },
     )
 
@@ -140,6 +141,7 @@ async def create_job(
     file: UploadFile = File(...),
     title: str = Form(""),
     author: str = Form(""),
+    create_kepub: bool = Form(False),
     _: None = Depends(api_auth),
     settings: Settings = Depends(settings_dep),
     store: JobStore = Depends(store_dep),
@@ -169,6 +171,7 @@ async def create_job(
         author=_clean_metadata(author),
         size_bytes=size,
         include_snapshots=True,
+        create_kepub=create_kepub,
         source_path=source_path,
     )
     await worker.enqueue(job.id)
@@ -248,6 +251,23 @@ async def download_job(
         raise HTTPException(status_code=404, detail="EPUB file missing")
     filename = f"{Path(job.source_filename).stem}.epub"
     return FileResponse(path, media_type="application/epub+zip", filename=filename)
+
+
+@app.get("/api/jobs/{job_id}/download/kepub")
+async def download_kepub_job(
+    job_id: str,
+    _: None = Depends(api_auth),
+    store: JobStore = Depends(store_dep),
+) -> FileResponse:
+    job = store.maybe_get_job(job_id)
+    if not job or not job.epub_path:
+        raise HTTPException(status_code=404, detail="KEPUB not found")
+    path = Path(job.epub_path)
+    kepub_path = path.with_name(f"{path.stem}.kepub.epub")
+    if not kepub_path.exists():
+        raise HTTPException(status_code=404, detail="KEPUB file missing")
+    filename = f"{Path(job.source_filename).stem}.kepub.epub"
+    return FileResponse(kepub_path, media_type="application/epub+zip", filename=filename)
 
 
 def _safe_filename(value: str) -> str:

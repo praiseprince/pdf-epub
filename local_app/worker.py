@@ -97,12 +97,18 @@ class JobWorker:
                 self.store.update_job(
                     job_id,
                     stage="Rendering page images",
-                    message="Rendering original PDF pages as the visual safety layer.",
-                    progress_total=pages,
+                    message="Rendering the first PDF page as the EPUB cover.",
+                    progress_total=1,
                 )
                 pages_dir = job_pages_dir(self.settings, job_id)
                 shutil.rmtree(pages_dir, ignore_errors=True)
-                snapshot_paths = render_pdf_pages(source_path, pages_dir, dpi=self.settings.snapshot_dpi)
+                snapshot_paths = render_pdf_pages(
+                    source_path,
+                    pages_dir,
+                    dpi=self.settings.snapshot_dpi,
+                    first_page=1,
+                    last_page=1,
+                )
                 self.store.update_job(job_id, progress_done=len(snapshot_paths))
 
             self._check_cancel(job_id)
@@ -143,11 +149,23 @@ class JobWorker:
                 self.store.update_job(job_id, raw_result_path=raw_result_path)
             except PaddleClientError as exc:
                 parse_error = str(exc)
+                if job.include_snapshots and self.settings.include_page_snapshots and len(snapshot_paths) < pages:
+                    self.store.update_job(
+                        job_id,
+                        stage="Rendering fallback pages",
+                        message="OCR failed. Rendering every PDF page for a visual fallback EPUB.",
+                        progress_done=0,
+                        progress_total=pages,
+                    )
+                    pages_dir = job_pages_dir(self.settings, job_id)
+                    shutil.rmtree(pages_dir, ignore_errors=True)
+                    snapshot_paths = render_pdf_pages(source_path, pages_dir, dpi=self.settings.snapshot_dpi)
+                    self.store.update_job(job_id, progress_done=len(snapshot_paths))
                 if not snapshot_paths:
                     raise RuntimeError(parse_error) from exc
 
             self._check_cancel(job_id)
-            message = "Building EPUB from OCR text and page images."
+            message = "Building EPUB from OCR text, figures, and rendered formulas."
             if parse_error:
                 message = "OCR failed, so building a visual fallback EPUB from PDF page images."
             self.store.update_job(job_id, stage="Building EPUB", message=message)
@@ -176,6 +194,9 @@ class JobWorker:
                 snapshot_source_dir=job_pages_dir(self.settings, job_id),
                 assets_source_dir=ocr_assets_dir,
             )
+            if job.create_kepub:
+                kepub_path = output_path.with_name(f"{output_path.stem}.kepub.epub")
+                shutil.copyfile(output_path, kepub_path)
 
             final_message = "EPUB is ready."
             if parse_error:

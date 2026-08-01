@@ -40,15 +40,29 @@ def pdfinfo(pdf_path: Path) -> dict[str, int | str]:
     return info
 
 
-def render_pdf_pages(pdf_path: Path, output_dir: Path, *, dpi: int = 120) -> list[Path]:
+def render_pdf_pages(
+    pdf_path: Path,
+    output_dir: Path,
+    *,
+    dpi: int = 120,
+    first_page: int | None = None,
+    last_page: int | None = None,
+) -> list[Path]:
     executable = shutil.which("pdftoppm")
     if not executable:
         raise PdfToolError("Poppler pdftoppm is required. Install poppler and try again.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = output_dir / "page"
+    command = [executable, "-png", "-r", str(dpi)]
+    if first_page is not None:
+        command.extend(["-f", str(first_page)])
+    if last_page is not None:
+        command.extend(["-l", str(last_page)])
+    command.extend([str(pdf_path), str(prefix)])
+
     proc = subprocess.run(
-        [executable, "-png", "-r", str(dpi), str(pdf_path), str(prefix)],
+        command,
         check=False,
         capture_output=True,
         text=True,
