@@ -78,12 +78,12 @@ PADDLEOCR_ACCESS_TOKEN=
 BLOB_READ_WRITE_TOKEN=
 CRON_SECRET=
 
-MAX_PDF_SIZE_MB=1024
+MAX_PDF_SIZE_MB=200
 MAX_PDF_PAGES=1000
 JOB_EXPIRATION_MINUTES=60
 MAX_IMAGE_SIZE_MB=256
 MAX_TOTAL_ASSET_MB=1024
-PDF_INSPECTION_MAX_MB=256
+PDF_INSPECTION_MAX_MB=200
 FINALIZE_IMAGE_PAGE_BATCH=5
 FINALIZE_CHAPTER_BATCH=5
 ```
@@ -235,28 +235,26 @@ and environment variables.
 Defaults are configurable. The checked-in example keeps app-level limits aligned
 with the main upstream constraints:
 
-- `MAX_PDF_SIZE_MB=1024`
+- `MAX_PDF_SIZE_MB=200`
 - `MAX_PDF_PAGES=1000`
 - `JOB_EXPIRATION_MINUTES=60`
 - `MAX_IMAGE_SIZE_MB=256`
 - `MAX_TOTAL_ASSET_MB=1024`
-- `PDF_INSPECTION_MAX_MB=256`
+- `PDF_INSPECTION_MAX_MB=200`
 - `FINALIZE_IMAGE_PAGE_BATCH=5`
 - `FINALIZE_CHAPTER_BATCH=5`
 
 Why these numbers:
 
-- `MAX_PDF_SIZE_MB=1024` stays inside the Vercel Hobby Blob storage allowance
-  for a personal deployment, even though Blob itself supports much larger
-  objects.
+- `MAX_PDF_SIZE_MB=200` matches PaddleOCR's async PDF file-size limit per
+  request, even though Vercel Blob itself supports much larger objects.
 - `MAX_PDF_PAGES=1000` matches PaddleOCR's async PDF page limit per request.
 - `MAX_IMAGE_SIZE_MB=256` leaves headroom under Vercel Function memory while
   image assets are downloaded, decoded, normalized, and staged.
 - `MAX_TOTAL_ASSET_MB=1024` keeps staged conversion assets inside the same
   personal Blob storage envelope.
-- `PDF_INSPECTION_MAX_MB=256` avoids buffering very large PDFs in a Function
-  just to count pages. Larger PDFs are signature-checked, then PaddleOCR
-  enforces its own page/request limits.
+- `PDF_INSPECTION_MAX_MB=200` means every allowed PDF can be page-counted before
+  submission without exceeding the PaddleOCR PDF-size limit.
 
 Set an app-level limit to `0`, `none`, `off`, or `unlimited` only when you
 explicitly want to delegate that constraint to the upstream service.

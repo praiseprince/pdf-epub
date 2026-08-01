@@ -22,12 +22,12 @@ describe("configurable limits", () => {
     delete process.env.MAX_TOTAL_ASSET_MB;
     delete process.env.PDF_INSPECTION_MAX_MB;
 
-    expect(maxPdfSizeBytes()).toBe(1024 * 1024 * 1024);
+    expect(maxPdfSizeBytes()).toBe(200 * 1024 * 1024);
     expect(maxPdfPages()).toBe(1000);
-    expect(maxPdfUploadBytes()).toBe(1024 * 1024 * 1024);
+    expect(maxPdfUploadBytes()).toBe(200 * 1024 * 1024);
     expect(maxImageSizeBytes()).toBe(256 * 1024 * 1024);
     expect(maxTotalAssetBytes()).toBe(1024 * 1024 * 1024);
-    expect(pdfInspectionMaxBytes()).toBe(256 * 1024 * 1024);
+    expect(pdfInspectionMaxBytes()).toBe(200 * 1024 * 1024);
   });
 
   it("treats 0 as no app-level cap", () => {

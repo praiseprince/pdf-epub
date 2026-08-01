@@ -8,7 +8,7 @@ function optionalMbLimit(name: string, fallback: number) {
 }
 
 export function maxPdfSizeBytes() {
-  return optionalMbLimit("MAX_PDF_SIZE_MB", 1024);
+  return optionalMbLimit("MAX_PDF_SIZE_MB", 200);
 }
 
 export function maxPdfUploadBytes() {
@@ -33,7 +33,7 @@ export function maxTotalAssetBytes() {
 }
 
 export function pdfInspectionMaxBytes() {
-  return optionalMbLimit("PDF_INSPECTION_MAX_MB", 256);
+  return optionalMbLimit("PDF_INSPECTION_MAX_MB", 200);
 }
 
 export function finalizeImagePageBatchSize() {
