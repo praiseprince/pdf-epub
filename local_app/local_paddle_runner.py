@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import time
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -102,9 +104,7 @@ def _normalize_page_result(result: Any, *, page: int) -> dict[str, Any]:
         markdown = {}
 
     text = _markdown_text(markdown)
-    markdown_images = markdown.get("markdown_images") or markdown.get("markdownImages") or {}
-    if not isinstance(markdown_images, dict):
-        markdown_images = {}
+    markdown_images = _dict_or_empty(markdown.get("markdown_images") or markdown.get("markdownImages"))
 
     result_json = getattr(result, "json", None)
     if not isinstance(result_json, dict):
@@ -113,8 +113,8 @@ def _normalize_page_result(result: Any, *, page: int) -> dict[str, Any]:
 
     page_result = {
         "markdownText": text,
-        "markdownImages": markdown_images,
-        "outputImages": _dict_or_empty(pruned.get("outputImages")),
+        "markdownImages": _jsonable(markdown_images),
+        "outputImages": _jsonable(_dict_or_empty(pruned.get("outputImages"))),
         "prunedResult": _pruned_result(pruned),
     }
     page_result["prunedResult"]["page_index"] = page - 1
@@ -149,6 +149,9 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
 
 
 def _jsonable(value: Any) -> Any:
+    image_data = _image_data_url(value)
+    if image_data is not None:
+        return image_data
     try:
         json.dumps(value)
         return value
@@ -158,6 +161,20 @@ def _jsonable(value: Any) -> Any:
         if isinstance(value, (list, tuple)):
             return [_jsonable(inner) for inner in value]
         return str(value)
+
+
+def _image_data_url(value: Any) -> str | None:
+    try:
+        from PIL import Image
+    except Exception:
+        Image = None  # type: ignore[assignment]
+
+    if Image is None or not isinstance(value, Image.Image):
+        return None
+    buffer = BytesIO()
+    value.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def _empty_page() -> dict[str, Any]:
