@@ -4,6 +4,8 @@ import base64
 import zipfile
 from pathlib import Path
 
+from PIL import Image
+
 from local_app.assets import add_page_snapshots, collect_paddle_assets, merge_bundles
 from local_app.epub_builder import build_epub
 
@@ -101,6 +103,8 @@ def test_epub_builder_renders_math_png_and_uses_first_pdf_page_as_cover(tmp_path
         chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
         cover_xhtml = epub.read("EPUB/text/cover.xhtml").decode("utf-8")
         names = epub.namelist()
+        display_math_name = next(name for name in names if name.startswith("EPUB/assets/math/") and name.endswith(".png"))
+        math_blob = epub.read(display_math_name)
 
     assert "$N = 6$" not in chapter
     assert "math-inline" in chapter
@@ -111,6 +115,11 @@ def test_epub_builder_renders_math_png_and_uses_first_pdf_page_as_cover(tmp_path
     assert "Converted from" not in cover_xhtml
     assert "<h1>Math</h1>" not in cover_xhtml
     assert any(name.startswith("EPUB/assets/math/") and name.endswith(".png") for name in names)
+    image_path = tmp_path / "display-math.png"
+    image_path.write_bytes(math_blob)
+    with Image.open(image_path) as image:
+        assert image.width > 100
+        assert image.height > 20
 
 
 def test_epub_builder_keeps_unrenderable_math_as_visible_source(tmp_path: Path) -> None:
