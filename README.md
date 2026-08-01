@@ -5,8 +5,8 @@ A minimal, private, stateless PDF-to-EPUB web app for one person.
 The app lets you sign in with a personal PIN, upload a PDF directly to private
 Vercel Blob storage, send a short-lived signed PDF URL to Baidu PaddleOCR for
 document parsing, and download a generated EPUB 3 file. It intentionally keeps
-no accounts, database, conversion history, analytics, billing, document library,
-or persistent backend worker.
+no accounts, database, backend conversion history, analytics, billing, document
+library, or persistent backend worker.
 
 ## Privacy Notice
 
@@ -17,7 +17,9 @@ this notice before upload:
 
 Temporary files are stored under the private Blob `tmp/` namespace and are
 deleted after conversion, after download cleanup, by the Delete now button, or
-by scheduled cleanup. No conversion history is intentionally retained.
+by scheduled cleanup. No backend conversion history is retained. The convert
+page stores short-lived signed job tokens in this browser so a submitted job can
+be checked again after a reload or browser restart.
 
 ## Features
 
@@ -26,6 +28,7 @@ by scheduled cleanup. No conversion history is intentionally retained.
 - Asynchronous PaddleOCR-VL-1.6 document parsing through the official
   `@paddleocr/api-sdk`
 - Stateless signed job tokens, no database
+- Browser-only saved jobs panel for reload/restart recovery
 - Markdown AST normalization before EPUB generation
 - EPUB 3 output with text, headings, links, lists, footnotes, tables, figures,
   captions, internal images, and MathJax SVG formula rendering
@@ -203,6 +206,7 @@ Deletion behavior:
 
 - source PDFs and OCR resources are deleted after successful EPUB generation
 - generated EPUBs expire after `JOB_EXPIRATION_MINUTES`, default 60
+- browser-saved jobs are pruned when their signed job token expires
 - Delete now removes the whole active job namespace
 - cancellation aborts client-side work where possible and deletes known temp files
 - `/api/cleanup` deletes expired objects only under valid app `tmp/` paths
@@ -225,6 +229,29 @@ Defaults are configurable:
 
 These are conservative personal-use limits intended to keep finalization inside
 Vercel Hobby Function duration and Blob usage limits.
+
+## Reloads And Long Jobs
+
+After a PDF is submitted to PaddleOCR, the convert page saves the signed job
+token in `localStorage`. Use the Saved jobs button on `/convert` to check,
+resume, refresh a download link, or delete jobs that are still within
+`JOB_EXPIRATION_MINUTES`.
+
+Closing the page during the direct upload cannot resume that upload because no
+PaddleOCR job exists yet. After submission, OCR runs asynchronously at
+PaddleOCR; the browser only polls status. The Vercel timeout-sensitive parts are
+submission and final EPUB generation:
+
+- `/api/jobs/submit` is configured for 240 seconds
+- `/api/jobs/finalize` is configured for 300 seconds
+- `/api/jobs/status` is short polling and is configured for 30 seconds
+
+For 50-100 page papers, OCR waiting can continue across reloads as long as the
+job token has not expired. The bigger risk is finalization: very image-heavy or
+formula-heavy documents can produce enough Markdown, images, and MathJax work
+to exceed the 300 second Hobby Function cap. If that happens regularly, reduce
+`MAX_PDF_PAGES`, split very large PDFs, or move the finalization step to a
+longer-running worker or a paid Vercel plan with a longer Function duration.
 
 ## Test
 

@@ -1,3 +1,4 @@
+import { BlobNotFoundError, head } from "@vercel/blob";
 import { NextRequest, NextResponse } from "next/server";
 import { resultEpubPath } from "@/lib/blob/paths";
 import { createSignedGetUrl } from "@/lib/blob/signed-url";
@@ -22,7 +23,16 @@ export async function GET(request: NextRequest) {
     return jsonError("The conversion expired.", 401);
   }
 
-  const downloadUrl = await createSignedGetUrl(resultEpubPath(jobClaims.jobId), 60 * 60 * 1000);
+  const outputPath = resultEpubPath(jobClaims.jobId);
+  try {
+    await head(outputPath);
+  } catch (error) {
+    if (error instanceof BlobNotFoundError) {
+      return jsonError("The EPUB is not ready yet.", 404);
+    }
+    return jsonError("The EPUB download is not available.", 500);
+  }
+
+  const downloadUrl = await createSignedGetUrl(outputPath, 60 * 60 * 1000);
   return NextResponse.json({ downloadUrl });
 }
-

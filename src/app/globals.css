@@ -172,6 +172,12 @@ p {
   background: var(--danger);
 }
 
+.button.compact {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 0.9rem;
+}
+
 .button:disabled {
   opacity: 0.62;
 }
@@ -253,6 +259,70 @@ p {
   background: var(--accent);
 }
 
+.jobs-panel {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.jobs-list {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.job-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.job-item:last-child {
+  border-bottom: 0;
+}
+
+.job-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.job-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.job-state {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.job-state.running,
+.job-state.building,
+.job-state.ready {
+  color: var(--accent-strong);
+}
+
+.job-state.failed,
+.job-state.expired {
+  color: var(--danger);
+}
+
 @media (max-width: 560px) {
   .panel {
     padding: 22px;
@@ -262,5 +332,8 @@ p {
   .row .input {
     width: 100%;
   }
-}
 
+  .job-title-row {
+    display: grid;
+  }
+}
