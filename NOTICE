@@ -4,7 +4,7 @@ https://github.com/jarodise/pdf2epub-paddle
 The upstream project is licensed under the MIT License. Its copyright and
 permission notice are preserved in LICENSE and in this notice as required.
 
-This implementation is a TypeScript/Next.js redesign. It does not copy the
-obsolete Python API endpoint flow. It uses the official hosted PaddleOCR
-TypeScript SDK and Vercel Blob direct uploads.
-
+This implementation is a local-first FastAPI app. It uses the official hosted
+PaddleOCR TypeScript SDK for document parsing, SQLite for local job state, and
+local filesystem storage for uploads, OCR artifacts, generated EPUBs, and comic
+conversion outputs.

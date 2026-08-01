@@ -26,7 +26,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("BAIDU_AI_STUDIO_API_KEY", "PADDLEOCR_ACCESS_TOKEN"),
     )
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
-    gemini_model: str = Field("gemini-2.5-flash-lite", alias="GEMINI_MODEL")
+    gemini_model: str = Field("gemini-3.1-flash-lite", alias="GEMINI_MODEL")
     baidu_ai_studio_base_url: str = Field("https://aistudio.baidu.com/llm/lmapi/v3", alias="BAIDU_AI_STUDIO_BASE_URL")
     baidu_ai_studio_model: str = Field("ernie-4.5-turbo-128k", alias="BAIDU_AI_STUDIO_MODEL")
 
