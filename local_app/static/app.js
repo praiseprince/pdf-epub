@@ -3,6 +3,9 @@ const fileInput = document.querySelector("#pdf-file");
 const dropZone = document.querySelector("#drop-zone");
 const selectedFile = document.querySelector("#selected-file");
 const uploadError = document.querySelector("#upload-error");
+const conversionMode = document.querySelector("#conversion-mode");
+const documentOptions = document.querySelector("#document-options");
+const comicOptions = document.querySelector("#comic-options");
 const jobsTable = document.querySelector("#jobs-table");
 const jobsBody = document.querySelector("#jobs-body");
 const jobsEmpty = document.querySelector("#jobs-empty");
@@ -83,17 +86,17 @@ function renderJobs(jobs) {
     `;
 
     row.querySelector(".job-title").textContent = job.title || job.source_filename;
-    const parserMeta = [job.parser_model, strategyLabel(job.parser_strategy)].filter(Boolean).join(" · ");
-    row.querySelector(".job-meta").textContent = `${job.source_filename} · ${formatBytes(job.size_bytes)}${parserMeta ? ` · ${parserMeta}` : ""}`;
+    const jobMeta = [job.source_filename, formatBytes(job.size_bytes), modeLabel(job)].filter(Boolean).join(" · ");
+    row.querySelector(".job-meta").textContent = jobMeta;
     row.querySelector(".status-pill").textContent = job.status;
     row.querySelector(".job-message").textContent = `${job.stage}${job.message ? ` · ${job.message}` : ""}`;
     row.querySelector(".progress").textContent = progressText(job);
 
     const actions = row.querySelector(".actions");
-    if (job.has_epub) {
+    if (job.has_output) {
       const download = document.createElement("a");
       download.href = `/api/jobs/${job.id}/download`;
-      download.textContent = "EPUB";
+      download.textContent = job.download_label || "Download";
       actions.append(download);
     }
     if (job.has_kepub) {
@@ -127,6 +130,21 @@ function strategyLabel(strategy) {
   if (strategy === "rendered_pages") return "Rendered pages";
   if (strategy === "auto") return "Auto retry";
   return strategy || "";
+}
+
+function modeLabel(job) {
+  if (job.conversion_mode === "comic") {
+    const output = (job.comic_output_format || "").toUpperCase();
+    return ["Comic", output, comicLayoutLabel(job.comic_layout)].filter(Boolean).join(" · ");
+  }
+  return [job.parser_model, strategyLabel(job.parser_strategy)].filter(Boolean).join(" · ");
+}
+
+function comicLayoutLabel(layout) {
+  if (layout === "manga") return "RTL";
+  if (layout === "comic") return "LTR";
+  if (layout === "webtoon") return "Webtoon";
+  return "";
 }
 
 async function postAction(jobId, action) {
@@ -181,6 +199,7 @@ if (form) {
       const formData = new FormData(form);
       await requestJson("/api/jobs", { method: "POST", body: formData });
       form.reset();
+      syncModeOptions();
       selectedFile.textContent = "Drop a file here or select one.";
       await loadJobs();
     } catch (error) {
@@ -190,6 +209,17 @@ if (form) {
     }
   });
 }
+
+function syncModeOptions() {
+  const comic = conversionMode?.value === "comic";
+  if (documentOptions) documentOptions.hidden = comic;
+  if (comicOptions) comicOptions.hidden = !comic;
+  const submit = form?.querySelector("button[type='submit']");
+  if (submit) submit.textContent = comic ? "Convert comic" : "Convert to EPUB";
+}
+
+conversionMode?.addEventListener("change", syncModeOptions);
+syncModeOptions();
 
 refreshButton?.addEventListener("click", () => loadJobs().catch((error) => setError(error.message)));
 

@@ -22,6 +22,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pdf", required=True, type=Path, help="Path to an existing real PDF.")
     parser.add_argument("--data-dir", type=Path, default=Path("tmp/local-smoke-data"))
     parser.add_argument("--mode", choices=["fixture", "live"], default="fixture")
+    parser.add_argument("--conversion-mode", choices=["document", "comic"], default="document")
+    parser.add_argument("--comic-output-format", choices=["kepub", "epub", "cbz"], default="kepub")
+    parser.add_argument("--comic-layout", choices=["manga", "comic", "webtoon"], default="manga")
     parser.add_argument("--snapshot-dpi", type=int, default=96)
     parser.add_argument("--allow-small", action="store_true", help="Allow PDFs under 100 pages.")
     parser.add_argument("--epubcheck", action="store_true", help="Run EPUBCheck when EPUBCHECK_JAR is available.")
@@ -78,7 +81,10 @@ def main() -> int:
         author="",
         size_bytes=source_pdf.stat().st_size,
         include_snapshots=True,
-        create_kepub=args.kepub,
+        create_kepub=args.kepub and args.conversion_mode == "document",
+        conversion_mode=args.conversion_mode,
+        comic_output_format=args.comic_output_format,
+        comic_layout=args.comic_layout,
         source_path=target_pdf,
     )
     worker._process_job(job.id)
@@ -95,26 +101,35 @@ def main() -> int:
     if finished.status != "done" or not finished.epub_path:
         return 1
 
-    epub_path = Path(finished.epub_path)
-    print(f"epub={epub_path}")
-    kepub_path = epub_path.with_name(f"{epub_path.stem}.kepub.epub")
+    output_path = Path(finished.epub_path)
+    print(f"output={output_path}")
+    kepub_path = output_path.with_name(f"{output_path.stem}.kepub.epub")
     if kepub_path.exists():
         print(f"kepub={kepub_path}")
-    print(f"epub_size={epub_path.stat().st_size}")
-    with zipfile.ZipFile(epub_path) as epub:
-        first = epub.namelist()[0]
-        page_files = [name for name in epub.namelist() if name.startswith("EPUB/text/page-")]
-        image_files = [name for name in epub.namelist() if name.startswith("EPUB/pages/page-")]
+    print(f"output_size={output_path.stat().st_size}")
+    with zipfile.ZipFile(output_path) as archive:
+        names = archive.namelist()
+        first = names[0]
+        page_files = [name for name in names if name.startswith("EPUB/text/page-") or name.startswith("OEBPS/Text/")]
+        image_files = [
+            name
+            for name in names
+            if name.startswith("EPUB/pages/page-")
+            or name.startswith("OEBPS/Images/")
+            or name.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+        ]
     print(f"first_zip_entry={first}")
     print(f"xhtml_pages={len(page_files)}")
-    print(f"page_images={len(image_files)}")
+    print(f"image_files={len(image_files)}")
 
     if args.epubcheck:
         jar = settings.epubcheck_jar or Path("tmp/epubcheck-5.3.0/epubcheck.jar").resolve()
-        if jar.exists():
-            subprocess.run(["java", "-jar", str(jar), str(epub_path)], check=True)
+        if output_path.name.endswith(".epub") and jar.exists():
+            subprocess.run(["java", "-jar", str(jar), str(output_path)], check=True)
             if kepub_path.exists():
                 subprocess.run(["java", "-jar", str(jar), str(kepub_path)], check=True)
+        elif not output_path.name.endswith(".epub"):
+            print("epubcheck skipped; output is not an EPUB")
         else:
             print(f"epubcheck skipped; jar not found at {jar}")
 

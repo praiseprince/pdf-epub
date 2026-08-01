@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     paddle_page_submit_retries: int = Field(2, alias="LOCAL_PADDLE_PAGE_SUBMIT_RETRIES")
     worker_poll_seconds: float = Field(1.0, alias="LOCAL_WORKER_POLL_SECONDS")
 
+    kcc_c2e_command: str = Field("", alias="LOCAL_KCC_C2E_COMMAND")
+    kcc_source_dir: Path | None = Field(Path("tmp/kcc-source-work"), alias="LOCAL_KCC_SOURCE_DIR")
+    kcc_profile: str = Field("KoCC", alias="LOCAL_KCC_PROFILE")
+    kcc_render_width: int = Field(1072, alias="LOCAL_KCC_RENDER_WIDTH")
+    kcc_force_color: bool = Field(True, alias="LOCAL_KCC_FORCE_COLOR")
+    kcc_disable_rotate: bool = Field(True, alias="LOCAL_KCC_DISABLE_ROTATE")
+
     epubcheck_jar: Path | None = Field(None, alias="EPUBCHECK_JAR")
 
     @property

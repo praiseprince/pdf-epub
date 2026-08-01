@@ -69,7 +69,10 @@ def test_epub_builder_renders_math_png_and_uses_first_pdf_page_as_cover(tmp_path
         "jobId": "fixture",
         "pages": [
             {
-                "markdownText": "Encoder depth is $N = 6$.\n\n$$Attention(Q,K,V)=softmax(QK^T)V$$",
+                "markdownText": (
+                    "Encoder depth is $N = 6$.\n\n"
+                    "$$\\mathbf{h}_{t+1}=\\mathbf{h}_{t}+f(\\mathbf{h}_{t},\\boldsymbol{\\theta}_{t}) \\tag*{(1)}$$"
+                ),
                 "markdownImages": {},
                 "outputImages": {},
             }
@@ -102,8 +105,41 @@ def test_epub_builder_renders_math_png_and_uses_first_pdf_page_as_cover(tmp_path
     assert "$N = 6$" not in chapter
     assert "math-inline" in chapter
     assert "math-block" in chapter
+    assert "math-source" not in chapter
     assert "page-snapshot" not in chapter
     assert "Cover page from source PDF" in cover_xhtml
     assert "Converted from" not in cover_xhtml
     assert "<h1>Math</h1>" not in cover_xhtml
     assert any(name.startswith("EPUB/assets/math/") and name.endswith(".png") for name in names)
+
+
+def test_epub_builder_keeps_unrenderable_math_as_visible_source(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": "$$\\frac{1}{$$",
+                "markdownImages": {},
+                "outputImages": {},
+            }
+        ],
+    }
+    assets_dir = tmp_path / "assets"
+    result = build_epub(
+        output_path=tmp_path / "bad-math.epub",
+        title="Bad Math",
+        author="",
+        original_filename="bad-math.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=tmp_path / "pages",
+        assets_source_dir=assets_dir,
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+
+    assert "formula(s) could not be rendered" in " ".join(result.warnings)
+    assert "math-source" in chapter
+    assert "\\frac{1}{" in chapter

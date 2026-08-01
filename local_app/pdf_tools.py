@@ -45,6 +45,7 @@ def render_pdf_pages(
     output_dir: Path,
     *,
     dpi: int = 120,
+    scale_to_width: int | None = None,
     first_page: int | None = None,
     last_page: int | None = None,
 ) -> list[Path]:
@@ -54,7 +55,11 @@ def render_pdf_pages(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = output_dir / "page"
-    command = [executable, "-png", "-r", str(dpi)]
+    command = [executable, "-png"]
+    if scale_to_width:
+        command.extend(["-scale-to-x", str(scale_to_width), "-scale-to-y", "-1"])
+    else:
+        command.extend(["-r", str(dpi)])
     if first_page is not None:
         command.extend(["-f", str(first_page)])
     if last_page is not None:

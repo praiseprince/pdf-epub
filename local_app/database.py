@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from .conversion_options import DEFAULT_COMIC_LAYOUT, DEFAULT_COMIC_OUTPUT_FORMAT, DEFAULT_CONVERSION_MODE
 from .parser_options import DEFAULT_PARSER_MODEL, DEFAULT_PARSER_STRATEGY
 
 
@@ -27,6 +28,9 @@ class JobRecord:
     pages: int | None
     size_bytes: int
     paddle_job_id: str | None
+    conversion_mode: str
+    comic_output_format: str
+    comic_layout: str
     parser_model: str
     parser_strategy: str
     include_snapshots: bool
@@ -55,12 +59,19 @@ class JobRecord:
             "pages": self.pages,
             "size_bytes": self.size_bytes,
             "paddle_job_id": self.paddle_job_id,
+            "conversion_mode": self.conversion_mode,
+            "comic_output_format": self.comic_output_format,
+            "comic_layout": self.comic_layout,
             "parser_model": self.parser_model,
             "parser_strategy": self.parser_strategy,
             "include_snapshots": self.include_snapshots,
+            "has_output": bool(self.epub_path),
             "has_epub": bool(self.epub_path),
+            "download_label": _download_label(self),
             "create_kepub": self.create_kepub,
-            "has_kepub": bool(self.epub_path and _kepub_path(self.epub_path).exists()),
+            "has_kepub": bool(
+                self.conversion_mode == "document" and self.epub_path and _kepub_path(self.epub_path).exists()
+            ),
             "error": self.error,
             "cancel_requested": self.cancel_requested,
             "created_at": self.created_at,
@@ -100,6 +111,9 @@ class JobStore:
                   pages INTEGER,
                   size_bytes INTEGER NOT NULL DEFAULT 0,
                   paddle_job_id TEXT,
+                  conversion_mode TEXT NOT NULL DEFAULT 'document',
+                  comic_output_format TEXT NOT NULL DEFAULT 'kepub',
+                  comic_layout TEXT NOT NULL DEFAULT 'manga',
                   parser_model TEXT NOT NULL DEFAULT 'PaddleOCR-VL-1.6',
                   parser_strategy TEXT NOT NULL DEFAULT 'auto',
                   include_snapshots INTEGER NOT NULL DEFAULT 1,
@@ -117,6 +131,24 @@ class JobStore:
                 """
             )
             _ensure_column(conn, "jobs", "create_kepub", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(
+                conn,
+                "jobs",
+                "conversion_mode",
+                f"TEXT NOT NULL DEFAULT '{DEFAULT_CONVERSION_MODE}'",
+            )
+            _ensure_column(
+                conn,
+                "jobs",
+                "comic_output_format",
+                f"TEXT NOT NULL DEFAULT '{DEFAULT_COMIC_OUTPUT_FORMAT}'",
+            )
+            _ensure_column(
+                conn,
+                "jobs",
+                "comic_layout",
+                f"TEXT NOT NULL DEFAULT '{DEFAULT_COMIC_LAYOUT}'",
+            )
             _ensure_column(
                 conn,
                 "jobs",
@@ -141,6 +173,9 @@ class JobStore:
         include_snapshots: bool,
         create_kepub: bool,
         source_path: Path,
+        conversion_mode: str = DEFAULT_CONVERSION_MODE,
+        comic_output_format: str = DEFAULT_COMIC_OUTPUT_FORMAT,
+        comic_layout: str = DEFAULT_COMIC_LAYOUT,
         parser_model: str = DEFAULT_PARSER_MODEL,
         parser_strategy: str = DEFAULT_PARSER_STRATEGY,
     ) -> JobRecord:
@@ -150,11 +185,12 @@ class JobStore:
                 """
                 INSERT INTO jobs (
                   id, source_filename, title, author, status, stage, message,
-                  size_bytes, include_snapshots, create_kepub, parser_model, parser_strategy,
+                  size_bytes, include_snapshots, create_kepub, conversion_mode,
+                  comic_output_format, comic_layout, parser_model, parser_strategy,
                   source_path, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, 'queued', 'Queued', 'Waiting for the local worker.',
-                        ?, ?, ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -164,6 +200,9 @@ class JobStore:
                     size_bytes,
                     1 if include_snapshots else 0,
                     1 if create_kepub else 0,
+                    conversion_mode,
+                    comic_output_format,
+                    comic_layout,
                     parser_model,
                     parser_strategy,
                     str(source_path),
@@ -268,6 +307,9 @@ def _row_to_job(row: sqlite3.Row) -> JobRecord:
         pages=row["pages"],
         size_bytes=row["size_bytes"],
         paddle_job_id=row["paddle_job_id"],
+        conversion_mode=row["conversion_mode"],
+        comic_output_format=row["comic_output_format"],
+        comic_layout=row["comic_layout"],
         parser_model=row["parser_model"],
         parser_strategy=row["parser_strategy"],
         include_snapshots=bool(row["include_snapshots"]),
@@ -297,3 +339,9 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
 def _kepub_path(epub_path: str) -> Path:
     path = Path(epub_path)
     return path.with_name(f"{path.stem}.kepub.epub")
+
+
+def _download_label(job: JobRecord) -> str:
+    if job.conversion_mode == "comic":
+        return {"kepub": "KEPUB", "epub": "EPUB", "cbz": "CBZ"}.get(job.comic_output_format, "Download")
+    return "EPUB"

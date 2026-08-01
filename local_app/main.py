@@ -11,6 +11,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import Settings, get_settings
+from .conversion_options import (
+    COMIC_LAYOUTS,
+    COMIC_OUTPUT_FORMATS,
+    CONVERSION_MODES,
+    normalize_comic_layout,
+    normalize_comic_output_format,
+    normalize_conversion_mode,
+)
 from .database import JobStore, serialize_jobs
 from .parser_options import PARSER_MODELS, PARSER_STRATEGIES, normalize_parser_model, normalize_parser_strategy
 from .paths import ensure_data_dirs, job_upload_dir
@@ -112,6 +120,9 @@ async def convert_page(request: Request, settings: Settings = Depends(settings_d
             "max_pdf_size_mb": settings.max_pdf_size_mb,
             "max_pdf_pages": settings.max_pdf_pages,
             "paddle_mode": settings.local_paddle_mode,
+            "conversion_modes": CONVERSION_MODES,
+            "comic_output_formats": COMIC_OUTPUT_FORMATS,
+            "comic_layouts": COMIC_LAYOUTS,
             "parser_models": PARSER_MODELS,
             "parser_strategies": PARSER_STRATEGIES,
             "default_parser_model": settings.paddle_model,
@@ -145,6 +156,9 @@ async def create_job(
     file: UploadFile = File(...),
     title: str = Form(""),
     author: str = Form(""),
+    conversion_mode: str = Form("document"),
+    comic_output_format: str = Form("kepub"),
+    comic_layout: str = Form("manga"),
     create_kepub: bool = Form(False),
     parser_model: str = Form(""),
     parser_strategy: str = Form("auto"),
@@ -177,7 +191,10 @@ async def create_job(
         author=_clean_metadata(author),
         size_bytes=size,
         include_snapshots=True,
-        create_kepub=create_kepub,
+        create_kepub=create_kepub and normalize_conversion_mode(conversion_mode) == "document",
+        conversion_mode=normalize_conversion_mode(conversion_mode),
+        comic_output_format=normalize_comic_output_format(comic_output_format),
+        comic_layout=normalize_comic_layout(comic_layout),
         parser_model=normalize_parser_model(parser_model or settings.paddle_model),
         parser_strategy=normalize_parser_strategy(parser_strategy),
         source_path=source_path,
@@ -253,12 +270,11 @@ async def download_job(
 ) -> FileResponse:
     job = store.maybe_get_job(job_id)
     if not job or not job.epub_path:
-        raise HTTPException(status_code=404, detail="EPUB not found")
+        raise HTTPException(status_code=404, detail="Output not found")
     path = Path(job.epub_path)
     if not path.exists():
-        raise HTTPException(status_code=404, detail="EPUB file missing")
-    filename = f"{Path(job.source_filename).stem}.epub"
-    return FileResponse(path, media_type="application/epub+zip", filename=filename)
+        raise HTTPException(status_code=404, detail="Output file missing")
+    return FileResponse(path, media_type=_download_media_type(path), filename=path.name)
 
 
 @app.get("/api/jobs/{job_id}/download/kepub")
@@ -286,3 +302,12 @@ def _safe_filename(value: str) -> str:
 
 def _clean_metadata(value: str | None) -> str:
     return re.sub(r"\s+", " ", (value or "").strip())[:200]
+
+
+def _download_media_type(path: Path) -> str:
+    name = path.name.lower()
+    if name.endswith(".epub"):
+        return "application/epub+zip"
+    if name.endswith(".cbz"):
+        return "application/vnd.comicbook+zip"
+    return "application/octet-stream"

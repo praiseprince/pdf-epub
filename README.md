@@ -23,14 +23,17 @@ legacy Next.js source tree, but the supported path in this branch is local-first
   Paddle image assets, and rendered PNG formula images
 - The first PDF page is used as the EPUB cover image; PDF page screenshots are
   not used as EPUB content
+- Comic/manga mode that bypasses Baidu, renders PDF pages locally, and wraps
+  Kindle Comic Converter for Kobo Clara Colour KEPUB, plain EPUB, or CBZ output
 - Download, cancel, retry, and delete controls for each saved job
 - Optional `.kepub.epub` copy for Kobo stock-reader testing
 
 ## Privacy
 
-The source PDF is saved locally. The only external conversion call is the Baidu
-PaddleOCR document parsing request. Generated files remain under `data/` until
-you delete the job.
+The source PDF is saved locally. Document/paper jobs call Baidu PaddleOCR for
+hosted parsing. Comic/manga jobs are local-only after upload: the app renders
+pages on your machine and runs KCC locally. Generated files remain under `data/`
+until you delete the job.
 
 ## Requirements
 
@@ -39,6 +42,8 @@ you delete the job.
 - npm
 - Poppler (`pdfinfo` and `pdftoppm`)
 - Baidu AI Studio / PaddleOCR access token
+- Optional for comic/manga mode: Kindle Comic Converter `kcc-c2e` or a local KCC
+  source checkout
 - Java only for EPUBCheck validation
 
 The PaddleOCR docs say the official TypeScript SDK accepts local `filePath`
@@ -68,7 +73,19 @@ LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
 LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_RETRIES=2
+LOCAL_KCC_SOURCE_DIR=tmp/kcc-source-work
 ```
+
+For comic/manga conversion, install or clone KCC:
+
+```sh
+git clone https://github.com/ciromattia/kcc.git tmp/kcc-source-work
+```
+
+The app uses `LOCAL_KCC_PROFILE=KoCC` by default for Kobo Clara Colour. If you
+install a standalone CLI instead, set `LOCAL_KCC_C2E_COMMAND=kcc-c2e`.
+`LOCAL_KCC_DISABLE_ROTATE=true` keeps KCC from rotating wide panels by default,
+which is more consistent for PDF-to-webtoon conversions.
 
 Run the app:
 
@@ -127,7 +144,14 @@ Use Delete in the app to remove a job and its local files.
 
 ## Parser Controls
 
-The upload form has two parser controls:
+The upload form starts with `Conversion type`:
+
+- `Document / paper`: sends the PDF through Baidu OCR and builds a reflowable
+  EPUB.
+- `Comic / manga`: bypasses Baidu, renders the PDF pages locally, and sends the
+  rendered images to KCC.
+
+Document jobs have two parser controls:
 
 - `Baidu model`: use `PaddleOCR-VL-1.6` by default. Try `PaddleOCR-VL-1.5`,
   `PaddleOCR-VL`, or `PP-StructureV3` when a document mostly converts well but a
@@ -136,14 +160,23 @@ The upload form has two parser controls:
   you want to test Baidu's direct PDF parser. `Rendered pages` skips full-PDF
   upload and sends locally rendered page images one by one.
 
+Comic jobs have two KCC controls:
+
+- `Output`: Kobo KEPUB, plain EPUB, or CBZ.
+- `Layout`: manga right-to-left, comic left-to-right, or webtoon/long strip.
+
 ## Math And Kobo
 
 The default math strategy is PNG-first:
 
 - Baidu/Paddle TeX snippets such as `$N = 6$` are rendered locally with MathJax
   and Sharp.
+- Common Baidu/LaTeX quirks such as `\tag*{...}` and `\boldsymbol{...}` are
+  repaired before rendering.
 - The rendered PNG is embedded inline or as a display equation.
 - The original TeX is preserved in the image `alt` text.
+- If a formula still cannot render, the EPUB keeps the TeX visibly as source
+  text instead of dropping it or emitting broken markup.
 - The `.kepub.epub` checkbox creates a second file with Kobo's sideload
   extension so you can test Kobo's stock renderer on the Clara Colour.
 

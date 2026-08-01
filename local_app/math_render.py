@@ -81,6 +81,9 @@ class MathRenderer:
                     self.cache.pop(token, None)
                     bundle.image_map.pop(f"math:{key}", None)
                     bundle.manifest_items.pop(f"assets/math/{key}.png", None)
+        repairs = [item for item in result.get("results", []) if item.get("ok") and item.get("repaired")]
+        if repairs:
+            warnings.append(f"{len(repairs)} formula(s) rendered after local syntax repair.")
 
         return bundle
 
@@ -88,6 +91,8 @@ class MathRenderer:
         href = self.cache.get(token)
         alt = html.escape(token.latex, quote=True)
         if not href:
+            if token.display:
+                return f'<pre class="math-source" role="math">{alt}</pre>'
             return f'<span class="math-source" role="math">{alt}</span>'
         if token.display:
             return f'<div class="math-block"><img class="math-display" src="../{href}" alt="{alt}" /></div>'

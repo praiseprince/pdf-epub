@@ -237,6 +237,10 @@ select {
   margin-top: 16px;
 }
 
+.mode-field {
+  margin-top: 16px;
+}
+
 .parser-grid {
   grid-template-columns: 1fr 1fr;
 }

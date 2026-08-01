@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from .assets import add_page_snapshots, collect_paddle_assets, merge_bundles
+from .comic_converter import KccComicConverter, KccComicError
 from .config import Settings
+from .conversion_options import (
+    normalize_comic_layout,
+    normalize_comic_output_format,
+    normalize_conversion_mode,
+)
 from .database import JobRecord, JobStore, utc_now
 from .epub_builder import build_epub, write_raw_result
 from .parser_options import ParserModel, normalize_parser_model, normalize_parser_strategy
@@ -90,6 +96,11 @@ class JobWorker:
             info = pdfinfo(source_path)
             pages = int(info.get("pages", 0) or 0)
             self.store.update_job(job_id, pages=pages)
+
+            conversion_mode = normalize_conversion_mode(job.conversion_mode)
+            if conversion_mode == "comic":
+                self._process_comic_job(job, source_path, pages=pages)
+                return
 
             if source_path.stat().st_size > self.settings.max_pdf_size_bytes:
                 raise RuntimeError(f"PDF exceeds {self.settings.max_pdf_size_mb} MB, the configured Baidu guardrail.")
@@ -339,6 +350,66 @@ class JobWorker:
             progress_total=pages,
         )
         return result
+
+    def _process_comic_job(self, job: JobRecord, source_path: Path, *, pages: int) -> None:
+        output_format = normalize_comic_output_format(job.comic_output_format)
+        layout = normalize_comic_layout(job.comic_layout)
+        rendered_dir = job_pages_dir(self.settings, job.id) / "comic-rendered"
+        output_dir = job_epub_dir(self.settings, job.id)
+        shutil.rmtree(rendered_dir, ignore_errors=True)
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+        self.store.update_job(
+            job.id,
+            stage="Rendering comic pages",
+            message=f"Rendering PDF pages locally at Kobo Clara Colour width ({self.settings.kcc_render_width}px).",
+            progress_done=0,
+            progress_total=pages,
+        )
+        page_paths = render_pdf_pages(source_path, rendered_dir, scale_to_width=self.settings.kcc_render_width)
+        if not page_paths:
+            raise RuntimeError("No comic pages were rendered from the PDF.")
+
+        self._check_cancel(job.id)
+        self.store.update_job(
+            job.id,
+            stage="Running KCC",
+            message=f"Optimizing {len(page_paths)} rendered page(s) with Kindle Comic Converter.",
+            progress_done=len(page_paths),
+            progress_total=len(page_paths),
+        )
+        converter = KccComicConverter(
+            command=self.settings.kcc_c2e_command,
+            source_dir=self.settings.kcc_source_dir,
+            profile=self.settings.kcc_profile,
+            force_color=self.settings.kcc_force_color,
+            disable_rotate=self.settings.kcc_disable_rotate,
+        )
+        try:
+            result = converter.convert(
+                input_dir=rendered_dir,
+                output_dir=output_dir,
+                title=job.title,
+                author=job.author,
+                output_format=output_format,
+                layout=layout,
+                final_stem=Path(job.source_filename).stem,
+            )
+        except KccComicError as exc:
+            raise RuntimeError(f"KCC conversion failed: {exc}") from exc
+
+        self._check_cancel(job.id)
+        self.store.update_job(
+            job.id,
+            status="done",
+            stage="Ready to download",
+            message=f"{output_format.upper()} comic output is ready.",
+            epub_path=result.output_path,
+            error=None,
+            progress_done=len(page_paths),
+            progress_total=len(page_paths),
+            finished_at=utc_now(),
+        )
 
 
 def delete_job_files(settings: Settings, job_id: str) -> None:

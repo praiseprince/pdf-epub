@@ -18,6 +18,9 @@ def test_job_store_persists_running_job(tmp_path: Path) -> None:
         size_bytes=source.stat().st_size,
         include_snapshots=True,
         create_kepub=True,
+        conversion_mode="document",
+        comic_output_format="kepub",
+        comic_layout="manga",
         source_path=source,
     )
     store.update_job(created.id, status="running", stage="Reading document")
@@ -28,3 +31,4 @@ def test_job_store_persists_running_job(tmp_path: Path) -> None:
     assert [job.id for job in resumed] == ["job-1"]
     assert resumed[0].stage == "Reading document"
     assert resumed[0].create_kepub is True
+    assert resumed[0].conversion_mode == "document"
