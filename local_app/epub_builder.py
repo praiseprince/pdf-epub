@@ -662,6 +662,7 @@ def _collect_preserved_figures(
                     if crop_box is None:
                         continue
                     crop = image.crop(crop_box)
+                    crop = _remove_page_header_from_crop(crop)
                     if crop.width < 32 or crop.height < 32:
                         continue
 
@@ -708,12 +709,13 @@ def _figure_crop_candidates(page: dict[str, Any]) -> list[FigureCropCandidate]:
         if not _is_figure_caption_text(caption_text):
             continue
 
-        visual_blocks: list[tuple[float, float, float, float]] = []
-        visual_indices: list[int] = []
+        visual_blocks, visual_indices = _visual_cluster_before_caption(items, caption_index, caption_bbox, page_height)
         for visual_index, item in enumerate(items):
             if visual_index in used_visuals or visual_index == caption_index:
                 continue
-            if item["label"] not in {"chart", "image", "figure"}:
+            if visual_index in visual_indices:
+                continue
+            if not _is_visual_layout_item(item):
                 continue
             bbox = item["bbox"]
             if not bbox or not _is_visual_for_caption(bbox, caption_bbox, max_gap):
@@ -723,6 +725,20 @@ def _figure_crop_candidates(page: dict[str, Any]) -> list[FigureCropCandidate]:
 
         if not visual_blocks:
             continue
+        for subfigure_index, item in enumerate(items):
+            if subfigure_index in used_visuals or subfigure_index == caption_index:
+                continue
+            if subfigure_index in visual_indices:
+                continue
+            if item["label"] not in {"figure_title", "figure_caption"}:
+                continue
+            bbox = item["bbox"]
+            if not bbox or not _is_subfigure_label_text(item["text"]):
+                continue
+            if not _is_subfigure_label_for_visuals(bbox, visual_blocks, caption_bbox):
+                continue
+            visual_blocks.append(bbox)
+            visual_indices.append(subfigure_index)
         crop_bbox = _expanded_visual_crop(
             visual_blocks,
             caption_bbox=caption_bbox,
@@ -745,8 +761,108 @@ def _figure_crop_candidates(page: dict[str, Any]) -> list[FigureCropCandidate]:
     return candidates
 
 
+def _visual_cluster_before_caption(
+    items: list[dict[str, Any]],
+    caption_index: int,
+    caption_bbox: tuple[float, float, float, float],
+    page_height: float,
+) -> tuple[list[tuple[float, float, float, float]], list[int]]:
+    blocks: list[tuple[float, float, float, float]] = []
+    indices: list[int] = []
+    found_visual = False
+    current_top = caption_bbox[1]
+    max_vertical_jump = max(160.0, page_height * 0.22)
+
+    for item_index in range(caption_index - 1, -1, -1):
+        item = items[item_index]
+        bbox = item["bbox"]
+        if not bbox:
+            continue
+
+        label = item["label"]
+        if label in {"header", "number", "footnote", "vision_footnote"}:
+            continue
+
+        if label in {"figure_title", "figure_caption"}:
+            if _is_subfigure_label_text(item["text"]) and _is_horizontally_related_to_caption(bbox, caption_bbox):
+                blocks.append(bbox)
+                indices.append(item_index)
+                current_top = min(current_top, bbox[1])
+                continue
+            break
+
+        if not _is_visual_layout_item(item):
+            if found_visual:
+                break
+            continue
+
+        if bbox[3] > caption_bbox[1] + max(6.0, page_height * 0.006):
+            continue
+        if not _is_horizontally_related_to_caption(bbox, caption_bbox):
+            if found_visual:
+                break
+            continue
+
+        gap = current_top - bbox[3]
+        if found_visual and gap > max_vertical_jump:
+            break
+
+        blocks.append(bbox)
+        indices.append(item_index)
+        found_visual = True
+        current_top = min(current_top, bbox[1])
+
+    if not found_visual:
+        return [], []
+    return blocks, indices
+
+
+def _is_visual_layout_item(item: dict[str, Any]) -> bool:
+    label = item["label"]
+    if label in {"chart", "image", "figure"}:
+        return True
+    return label == "table" and _looks_like_plot_table(item)
+
+
+def _looks_like_plot_table(item: dict[str, Any]) -> bool:
+    bbox = item["bbox"]
+    if not bbox:
+        return False
+    x1, y1, x2, y2 = bbox
+    if x2 - x1 < 120 or y2 - y1 < 80:
+        return False
+
+    text = _clean_text(item["text"]).lower()
+    if not text:
+        return False
+    numeric_tokens = re.findall(r"[-+]?(?:\d*\.\d+|\d+)(?:e[-+]?\d+)?%?", text)
+    if len(numeric_tokens) < 12:
+        return False
+    plot_terms = {
+        "axis",
+        "epoch",
+        "epochs",
+        "iteration",
+        "iterations",
+        "iou",
+        "loss",
+        "mask quality rating",
+        "miou",
+        "precision",
+        "rating",
+        "recall",
+        "score",
+        "training",
+    }
+    return any(term in text for term in plot_terms) or len(numeric_tokens) >= 24
+
+
 def _is_figure_caption_text(value: str) -> bool:
     return bool(re.match(r"(?i)^\s*fig(?:ure)?\.?\s*\d+", _clean_text(value)))
+
+
+def _is_subfigure_label_text(value: str) -> bool:
+    return bool(re.match(r"(?i)^\s*\([a-z]\)(?:\s+.{1,80})?\s*$", _clean_text(value)))
 
 
 def _layout_items(page: dict[str, Any]) -> list[dict[str, Any]]:
@@ -785,6 +901,43 @@ def _is_visual_for_caption(
     return center_distance <= max(x2 - x1, cx2 - cx1) * 0.75
 
 
+def _is_horizontally_related_to_caption(
+    bbox: tuple[float, float, float, float],
+    caption_bbox: tuple[float, float, float, float],
+) -> bool:
+    x1, _y1, x2, _y2 = bbox
+    cx1, _cy1, cx2, _cy2 = caption_bbox
+    overlap = max(0.0, min(x2, cx2) - max(x1, cx1))
+    if overlap / max(1.0, min(x2 - x1, cx2 - cx1)) >= 0.1:
+        return True
+    center = (x1 + x2) / 2.0
+    caption_width = cx2 - cx1
+    return (cx1 - caption_width * 0.35) <= center <= (cx2 + caption_width * 0.35)
+
+
+def _is_subfigure_label_for_visuals(
+    bbox: tuple[float, float, float, float],
+    visual_blocks: list[tuple[float, float, float, float]],
+    caption_bbox: tuple[float, float, float, float],
+) -> bool:
+    x1, y1, x2, y2 = bbox
+    _cx1, cy1, _cx2, _cy2 = caption_bbox
+    visual_left = min(block[0] for block in visual_blocks)
+    visual_top = min(block[1] for block in visual_blocks)
+    visual_right = max(block[2] for block in visual_blocks)
+    visual_bottom = max(block[3] for block in visual_blocks)
+    if y1 < visual_top or y2 > cy1:
+        return False
+    if y1 - visual_bottom > max(80.0, (cy1 - visual_bottom) * 0.8):
+        return False
+    overlap = max(0.0, min(x2, visual_right) - max(x1, visual_left))
+    width = max(1.0, x2 - x1)
+    if overlap / width >= 0.25:
+        return True
+    center = (x1 + x2) / 2.0
+    return visual_left <= center <= visual_right
+
+
 def _inject_preserved_figures(markdown: str, figures: list[PreservedFigure]) -> str:
     if not markdown.strip() or not figures:
         return markdown
@@ -815,11 +968,33 @@ def _inject_preserved_figures(markdown: str, figures: list[PreservedFigure]) -> 
 
 
 def _strip_trailing_tables(markdown_prefix: str) -> tuple[str, int]:
-    pattern = re.compile(r"(?P<tables>(?:\s*<table\b[^>]*>.*?</table>\s*)+)$", flags=re.IGNORECASE | re.DOTALL)
+    updated = markdown_prefix.rstrip()
+    removed = 0
+
+    while updated:
+        without_subfigures = _strip_trailing_subfigure_labels(updated)
+        table_match = re.search(
+            r"<table\b(?:(?!<table\b).)*?</table>\s*$",
+            without_subfigures,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not table_match:
+            break
+        updated = without_subfigures[: table_match.start()].rstrip()
+        removed += 1
+
+    return updated, removed
+
+
+def _strip_trailing_subfigure_labels(markdown_prefix: str) -> str:
+    pattern = re.compile(
+        r"(?:\s*<(?:div|p|center)\b[^>]*>\s*\([a-zA-Z]\)(?:\s+.{1,80})?\s*</(?:div|p|center)>\s*)+$",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     match = pattern.search(markdown_prefix.rstrip())
     if not match:
-        return markdown_prefix, 0
-    return markdown_prefix[: match.start("tables")], len(re.findall(r"<table\b", match.group("tables"), re.IGNORECASE))
+        return markdown_prefix.rstrip()
+    return markdown_prefix[: match.start()].rstrip()
 
 
 def _caption_anchor(caption_text: str) -> str:
@@ -876,6 +1051,59 @@ def _scaled_crop_box(
     return (left, upper, right, lower)
 
 
+def _remove_page_header_from_crop(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    if width < 160 or height < 120:
+        return image
+
+    scan_height = min(max(36, height // 3), 170)
+    gray = image.crop((0, 0, width, scan_height)).convert("L")
+    pixels = gray.tobytes()
+    dark_counts = [
+        sum(1 for value in pixels[row * width : (row + 1) * width] if value < 210)
+        for row in range(scan_height)
+    ]
+    rule_threshold = width * 0.42
+    blank_threshold = max(2, int(width * 0.012))
+    content_threshold = max(4, int(width * 0.02))
+
+    max_rule_row = min(scan_height, max(24, int(height * 0.18)))
+    rule_row = next(
+        (
+            row
+            for row, count in enumerate(dark_counts[:max_rule_row])
+            if count >= rule_threshold
+        ),
+        None,
+    )
+    if rule_row is None:
+        return image
+
+    min_blank = max(10, int(height * 0.035))
+    row = rule_row + 1
+    while row < scan_height:
+        if dark_counts[row] > blank_threshold:
+            row += 1
+            continue
+        blank_start = row
+        while row < scan_height and dark_counts[row] <= blank_threshold:
+            row += 1
+        if row - blank_start < min_blank:
+            continue
+        next_content = next(
+            (candidate for candidate in range(row, scan_height) if dark_counts[candidate] >= content_threshold),
+            None,
+        )
+        if next_content is None:
+            return image
+        top = max(0, next_content - max(3, int(height * 0.012)))
+        if top <= 0 or height - top < 80:
+            return image
+        return image.crop((0, top, width, height))
+
+    return image
+
+
 def _expanded_visual_crop(
     blocks: list[tuple[float, float, float, float]],
     *,
@@ -890,7 +1118,7 @@ def _expanded_visual_crop(
     y2 = max(block[3] for block in blocks)
     margin_x = max(10.0, page_width * 0.025)
     margin_y = max(10.0, page_height * 0.018)
-    caption_keepout = max(4.0, page_height * 0.017)
+    caption_keepout = max(2.0, page_height * 0.002)
 
     left = max(0.0, x1 - margin_x)
     upper = max(0.0, y1 - margin_y)
@@ -904,13 +1132,15 @@ def _expanded_visual_crop(
 
     neighbor_keepout = max(4.0, page_width * 0.004)
     vertical_keepout = max(4.0, page_height * 0.005)
+    upper_neighbor_gap = max(70.0, page_height * 0.08)
+    upper_neighbor_padding = max(vertical_keepout, page_height * 0.04)
     for neighbor in neighbor_blocks:
         nx1, ny1, nx2, ny2 = neighbor
         if _vertical_overlap_ratio((x1, upper, x2, lower), neighbor) < 0.1:
             if _horizontal_overlap_ratio((left, y1, right, y2), neighbor) < 0.1:
                 continue
-            if upper < ny2 <= y1:
-                upper = min(y1, max(upper, ny2 + vertical_keepout))
+            if ny2 <= y1 and y1 - ny2 <= upper_neighbor_gap:
+                upper = min(y1, max(upper, ny2 + upper_neighbor_padding))
             elif y2 <= ny1 < lower:
                 lower = max(y2, min(lower, ny1 - vertical_keepout))
             continue

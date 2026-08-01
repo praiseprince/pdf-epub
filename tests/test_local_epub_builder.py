@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from local_app.assets import add_page_snapshots, collect_paddle_assets, merge_bundles
-from local_app.epub_builder import build_epub
+from local_app.epub_builder import _remove_page_header_from_crop, build_epub
 
 
 ONE_PIXEL_PNG = base64.b64encode(
@@ -369,8 +369,285 @@ After the figure.
     crop_path.write_bytes(crop)
     with Image.open(crop_path) as image:
         assert image.width >= 80
-        assert image.height == 50
+        assert image.height >= 50
         assert image.getpixel((0, 20)) == (20, 80, 160)
+
+
+def test_epub_builder_preserves_multiple_plot_crops_without_erasing_earlier_figures(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": """
+<table><tr><th>Iterations</th><th>Loss</th></tr><tr><td>0</td><td>1.0</td></tr></table>
+
+<div style="text-align: center;">(a)</div>
+
+<div style="text-align: center;">(b)</div>
+
+<div style="text-align: center;">Figure 2: Training loss curves.</div>
+
+<table><tr><th>Epoch</th><th>Accuracy</th></tr><tr><td>1</td><td>0.7</td></tr></table>
+
+<div style="text-align: center;">Figure 3: Accuracy curves.</div>
+""",
+                "markdownImages": {},
+                "outputImages": {},
+                "prunedResult": {
+                    "width": 1000,
+                    "height": 1000,
+                    "parsing_res_list": [
+                        {
+                            "block_label": "table",
+                            "block_bbox": [120, 100, 880, 330],
+                            "block_content": "Iterations | Loss\n0 | 1.0\n1 | 0.7\n2 | 0.4\n3 | 0.2\n4 | 0.1\n5 | 0.05",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [240, 342, 280, 365],
+                            "block_content": "(a)",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [720, 342, 760, 365],
+                            "block_content": "(b)",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [120, 380, 880, 430],
+                            "block_content": "Figure 2: Training loss curves.",
+                        },
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [120, 520, 880, 760],
+                            "block_content": "Epoch | Accuracy\n1 | 0.7\n2 | 0.8\n3 | 0.9\n4 | 0.92\n5 | 0.94",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [120, 790, 880, 840],
+                            "block_content": "Figure 3: Accuracy curves.",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    page_image = Image.new("RGB", (1000, 1000), "white")
+    for x in range(120, 880):
+        for y in range(100, 365):
+            page_image.putpixel((x, y), (20, 80, 160))
+    for x in range(120, 880):
+        for y in range(520, 760):
+            page_image.putpixel((x, y), (20, 160, 80))
+    page_image.save(pages_dir / "page-01.png")
+
+    result = build_epub(
+        output_path=tmp_path / "multi-figures.epub",
+        title="Multiple figures",
+        author="",
+        original_filename="multi-figures.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=pages_dir,
+        assets_source_dir=tmp_path / "assets",
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+        names = epub.namelist()
+
+    assert chapter.count("preserved-figure") == 2
+    assert "Figure 2: Training loss curves" in chapter
+    assert "Figure 3: Accuracy curves" in chapter
+    assert "<table" not in chapter
+    assert "Iterations" not in chapter
+    assert "EPUB/assets/figure-crops/page-0001-figure-01.png" in names
+    assert "EPUB/assets/figure-crops/page-0001-figure-02.png" in names
+
+
+def test_epub_builder_trims_page_header_from_preserved_figure_crop(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": """
+<table><tr><th>Epoch</th><th>Loss</th></tr><tr><td>0</td><td>1.0</td></tr></table>
+
+<div style="text-align: center;">Figure 4: Loss curves.</div>
+""",
+                "markdownImages": {},
+                "outputImages": {},
+                "prunedResult": {
+                    "width": 1000,
+                    "height": 1000,
+                    "parsing_res_list": [
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [120, 92, 880, 360],
+                            "block_content": "Epoch | Loss\n0 | 1.0\n1 | 0.8\n2 | 0.6\n3 | 0.4\n4 | 0.2",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [120, 390, 880, 440],
+                            "block_content": "Figure 4: Loss curves.",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    page_image = Image.new("RGB", (1000, 1000), "white")
+    for x in range(70, 930):
+        page_image.putpixel((x, 80), (0, 0, 0))
+        page_image.putpixel((x, 81), (0, 0, 0))
+    for x in range(120, 880):
+        for y in range(132, 360):
+            page_image.putpixel((x, y), (20, 80, 160))
+    page_image.save(pages_dir / "page-01.png")
+
+    result = build_epub(
+        output_path=tmp_path / "trimmed-figure.epub",
+        title="Trimmed figure",
+        author="",
+        original_filename="trimmed-figure.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=pages_dir,
+        assets_source_dir=tmp_path / "assets",
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        crop = epub.read("EPUB/assets/figure-crops/page-0001-figure-01.png")
+
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(crop)
+    with Image.open(crop_path) as image:
+        top_row = [image.getpixel((x, 0)) for x in range(image.width)]
+        assert top_row.count((0, 0, 0)) < image.width * 0.1
+        assert any(image.getpixel((image.width // 2, y)) == (20, 80, 160) for y in range(0, 16))
+        assert image.height < 300
+
+
+def test_page_header_trim_does_not_remove_upper_panels_from_multirow_plot() -> None:
+    image = Image.new("RGB", (760, 300), "white")
+    for x in range(20, 740):
+        image.putpixel((x, 72), (0, 0, 0))
+        image.putpixel((x, 73), (0, 0, 0))
+    for x in range(20, 740):
+        for y in range(24, 68):
+            image.putpixel((x, y), (20, 80, 160))
+    for x in range(20, 740):
+        for y in range(132, 190):
+            image.putpixel((x, y), (20, 160, 80))
+
+    trimmed = _remove_page_header_from_crop(image)
+
+    assert trimmed.size == image.size
+
+
+def test_epub_builder_crops_full_multirow_plot_cluster(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": """
+<table><tr><th>Mask quality rating</th><th>A</th></tr><tr><td>1</td><td>4</td></tr></table>
+<div style="text-align: center;">(a) Dataset A</div>
+<table><tr><th>Mask quality rating</th><th>B</th></tr><tr><td>1</td><td>6</td></tr></table>
+<div style="text-align: center;">(b) Dataset B</div>
+<table><tr><th>Mask quality rating</th><th>C</th></tr><tr><td>1</td><td>8</td></tr></table>
+<div style="text-align: center;">(c) Dataset C</div>
+<div style="text-align: center;">Figure 18: Mask quality rating distributions.</div>
+""",
+                "markdownImages": {},
+                "outputImages": {},
+                "prunedResult": {
+                    "width": 1000,
+                    "height": 1000,
+                    "parsing_res_list": [
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [100, 80, 450, 190],
+                            "block_content": "Mask quality rating | A\n1 | 4\n2 | 8\n3 | 16\n4 | 32",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [210, 195, 340, 215],
+                            "block_content": "(a) Dataset A",
+                        },
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [100, 260, 450, 370],
+                            "block_content": "Mask quality rating | B\n1 | 6\n2 | 12\n3 | 18\n4 | 24",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [210, 375, 340, 395],
+                            "block_content": "(b) Dataset B",
+                        },
+                        {
+                            "block_label": "chart",
+                            "block_bbox": [100, 440, 450, 550],
+                            "block_content": "Mask quality rating | C\n1 | 8\n2 | 16\n3 | 24\n4 | 32",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [210, 555, 340, 575],
+                            "block_content": "(c) Dataset C",
+                        },
+                        {
+                            "block_label": "figure_title",
+                            "block_bbox": [100, 600, 780, 640],
+                            "block_content": "Figure 18: Mask quality rating distributions.",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir()
+    page_image = Image.new("RGB", (1000, 1000), "white")
+    for x in range(100, 450):
+        for y in range(80, 190):
+            page_image.putpixel((x, y), (20, 80, 160))
+        for y in range(260, 370):
+            page_image.putpixel((x, y), (20, 160, 80))
+        for y in range(440, 550):
+            page_image.putpixel((x, y), (160, 80, 20))
+    page_image.save(pages_dir / "page-01.png")
+
+    result = build_epub(
+        output_path=tmp_path / "multirow-figure.epub",
+        title="Multirow figure",
+        author="",
+        original_filename="multirow-figure.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=pages_dir,
+        assets_source_dir=tmp_path / "assets",
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        crop = epub.read("EPUB/assets/figure-crops/page-0001-figure-01.png")
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+
+    crop_path = tmp_path / "crop.png"
+    crop_path.write_bytes(crop)
+    with Image.open(crop_path) as image:
+        colors = {color for _count, color in image.getcolors(maxcolors=1_000_000)}
+        assert (20, 80, 160) in colors
+        assert (20, 160, 80) in colors
+        assert (160, 80, 20) in colors
+        assert image.height > 460
+    assert "<table" not in chapter
 
 
 def test_epub_builder_does_not_strip_tables_without_plausible_figure_crop(tmp_path: Path) -> None:
