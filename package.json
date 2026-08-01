@@ -8,7 +8,7 @@
     "local:secrets": "python3 scripts/generate-local-secrets.py",
     "local:smoke": "python3 scripts/smoke-local.py",
     "python:test": "pytest",
-    "node:check": "node --check local_app/node/math_render.mjs && node --check local_app/node/paddle_client.mjs"
+    "node:check": "node --check local_app/node/math_render.mjs && node --check local_app/node/mathml_render.mjs && node --check local_app/node/paddle_client.mjs"
   },
   "dependencies": {
     "@paddleocr/api-sdk": "0.2.3",

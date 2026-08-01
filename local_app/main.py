@@ -20,6 +20,7 @@ from .conversion_options import (
     normalize_conversion_mode,
 )
 from .database import JobStore, serialize_jobs
+from .llm_options import MATH_REPAIR_PROVIDERS, normalize_math_repair_provider
 from .parser_options import PARSER_MODELS, PARSER_STRATEGIES, normalize_parser_model, normalize_parser_strategy
 from .paths import ensure_data_dirs, job_upload_dir
 from .security import clear_session_cookie, read_session, require_api_session, set_session_cookie, verify_pin
@@ -126,6 +127,8 @@ async def convert_page(request: Request, settings: Settings = Depends(settings_d
             "parser_models": PARSER_MODELS,
             "parser_strategies": PARSER_STRATEGIES,
             "default_parser_model": settings.paddle_model,
+            "math_repair_providers": MATH_REPAIR_PROVIDERS,
+            "default_math_repair_provider": settings.math_repair_provider,
             "create_kepub_default": settings.create_kepub_default,
         },
     )
@@ -162,6 +165,7 @@ async def create_job(
     create_kepub: bool = Form(False),
     parser_model: str = Form(""),
     parser_strategy: str = Form("auto"),
+    math_repair_provider: str = Form("off"),
     _: None = Depends(api_auth),
     settings: Settings = Depends(settings_dep),
     store: JobStore = Depends(store_dep),
@@ -184,6 +188,7 @@ async def create_job(
             size += len(chunk)
             stream.write(chunk)
 
+    normalized_mode = normalize_conversion_mode(conversion_mode)
     job = store.create_job(
         job_id=job_id,
         source_filename=filename,
@@ -191,12 +196,13 @@ async def create_job(
         author=_clean_metadata(author),
         size_bytes=size,
         include_snapshots=True,
-        create_kepub=create_kepub and normalize_conversion_mode(conversion_mode) == "document",
-        conversion_mode=normalize_conversion_mode(conversion_mode),
+        create_kepub=create_kepub and normalized_mode == "document",
+        conversion_mode=normalized_mode,
         comic_output_format=normalize_comic_output_format(comic_output_format),
         comic_layout=normalize_comic_layout(comic_layout),
         parser_model=normalize_parser_model(parser_model or settings.paddle_model),
         parser_strategy=normalize_parser_strategy(parser_strategy),
+        math_repair_provider=normalize_math_repair_provider(math_repair_provider) if normalized_mode == "document" else "off",
         source_path=source_path,
     )
     await worker.enqueue(job.id)

@@ -4,9 +4,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .llm_options import DEFAULT_MATH_REPAIR_PROVIDER, MathRepairProvider
 from .parser_options import DEFAULT_PARSER_MODEL, ParserModel
 
 
@@ -20,7 +21,14 @@ class Settings(BaseSettings):
 
     app_pin_hash: str = Field("", alias="APP_PIN_HASH")
     session_secret: str = Field("", alias="SESSION_SECRET")
-    paddleocr_access_token: str = Field("", alias="PADDLEOCR_ACCESS_TOKEN")
+    baidu_ai_studio_api_key: str = Field(
+        "",
+        validation_alias=AliasChoices("BAIDU_AI_STUDIO_API_KEY", "PADDLEOCR_ACCESS_TOKEN"),
+    )
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    gemini_model: str = Field("gemini-2.5-flash-lite", alias="GEMINI_MODEL")
+    baidu_ai_studio_base_url: str = Field("https://aistudio.baidu.com/llm/lmapi/v3", alias="BAIDU_AI_STUDIO_BASE_URL")
+    baidu_ai_studio_model: str = Field("ernie-4.5-turbo-128k", alias="BAIDU_AI_STUDIO_MODEL")
 
     local_data_dir: Path = Field(Path("data"), alias="LOCAL_DATA_DIR")
     local_host: str = Field("127.0.0.1", alias="LOCAL_HOST")
@@ -41,6 +49,12 @@ class Settings(BaseSettings):
     paddle_page_submit_timeout_seconds: int = Field(120, alias="LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS")
     paddle_page_submit_retries: int = Field(2, alias="LOCAL_PADDLE_PAGE_SUBMIT_RETRIES")
     worker_poll_seconds: float = Field(1.0, alias="LOCAL_WORKER_POLL_SECONDS")
+    math_repair_provider: MathRepairProvider = Field(
+        DEFAULT_MATH_REPAIR_PROVIDER,
+        alias="LOCAL_MATH_REPAIR_PROVIDER",
+    )
+    llm_request_timeout_seconds: int = Field(60, alias="LOCAL_LLM_REQUEST_TIMEOUT_SECONDS")
+    llm_max_failed_formulas_per_job: int = Field(200, alias="LOCAL_LLM_MAX_FAILED_FORMULAS_PER_JOB")
 
     kcc_c2e_command: str = Field("", alias="LOCAL_KCC_C2E_COMMAND")
     kcc_source_dir: Path | None = Field(Path("tmp/kcc-source-work"), alias="LOCAL_KCC_SOURCE_DIR")

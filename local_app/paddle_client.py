@@ -43,8 +43,8 @@ class PaddleClient:
         if self.settings.local_paddle_mode == "fixture":
             return self.fixture_result(file_path, page_count=page_count)
 
-        if not self.settings.paddleocr_access_token:
-            raise PaddleClientError("PADDLEOCR_ACCESS_TOKEN is not configured.")
+        if not self.settings.baidu_ai_studio_api_key:
+            raise PaddleClientError("BAIDU_AI_STUDIO_API_KEY is not configured.")
 
         submitted = self._run(
             "submit",
@@ -153,7 +153,7 @@ class PaddleClient:
         request_timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         env = os.environ.copy()
-        env["PADDLEOCR_ACCESS_TOKEN"] = self.settings.paddleocr_access_token
+        env["BAIDU_AI_STUDIO_API_KEY"] = self.settings.baidu_ai_studio_api_key
         env["PADDLEOCR_MODEL"] = str(payload.get("model") or self.settings.paddle_model)
         if request_timeout_seconds:
             env["PADDLEOCR_REQUEST_TIMEOUT_MS"] = str(max(1, request_timeout_seconds) * 1000)

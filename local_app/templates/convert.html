@@ -60,10 +60,18 @@
                   <option value="rendered_pages">Rendered pages</option>
                 </select>
               </label>
+              <label>
+                Math repair
+                <select id="math-repair-provider" name="math_repair_provider">
+                  {% for value, label in math_repair_providers %}
+                    <option value="{{ value }}" {% if value == default_math_repair_provider %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
             </div>
             <label class="check-row">
               <input name="create_kepub" type="checkbox" value="true" {% if create_kepub_default %}checked{% endif %}>
-              Create Kobo .kepub.epub copy
+              Create Kobo MathML .kepub.epub
             </label>
           </div>
           <div id="comic-options" hidden>

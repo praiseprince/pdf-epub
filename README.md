@@ -20,13 +20,14 @@ The previous Vercel/Blob implementation is preserved on the
 - Automatic OCR retry path: full-PDF submit first, then rendered page-by-page
   OCR if Baidu does not accept the PDF upload promptly
 - EPUB builder that preserves OCR Markdown, sanitized raw HTML tables/figures,
-  Paddle image assets, and rendered PNG formula images
+  Paddle image assets, PNG formula images for plain EPUB, and MathML formulas
+  for Kobo KEPUB
 - The first PDF page is used as the EPUB cover image; PDF page screenshots are
   not used as EPUB content
 - Comic/manga mode that bypasses Baidu, renders PDF pages locally, and wraps
   Kindle Comic Converter for Kobo Clara Colour KEPUB, plain EPUB, or CBZ output
 - Download, cancel, retry, and delete controls for each saved job
-- Optional `.kepub.epub` copy for Kobo stock-reader testing
+- Optional Kobo MathML `.kepub.epub` output for Kobo stock-reader testing
 
 ## Privacy
 
@@ -41,7 +42,8 @@ until you delete the job.
 - Node.js 22 or newer
 - npm
 - Poppler (`pdfinfo` and `pdftoppm`)
-- Baidu AI Studio / PaddleOCR access token
+- Baidu AI Studio API key
+- Optional Gemini API key for failed-equation repair
 - Optional for comic/manga mode: Kindle Comic Converter `kcc-c2e` or a local KCC
   source checkout
 - Java only for EPUBCheck validation
@@ -68,13 +70,22 @@ Create `.env` from `.env.example`, then fill in:
 ```sh
 APP_PIN_HASH=
 SESSION_SECRET=
-PADDLEOCR_ACCESS_TOKEN=
+BAIDU_AI_STUDIO_API_KEY=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash-lite
+BAIDU_AI_STUDIO_MODEL=ernie-4.5-turbo-128k
 LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
 LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_RETRIES=2
+LOCAL_MATH_REPAIR_PROVIDER=off
 LOCAL_KCC_SOURCE_DIR=tmp/kcc-source-work
 ```
+
+`BAIDU_AI_STUDIO_API_KEY` is the default credential name for both Baidu
+PaddleOCR document parsing and Baidu AI Studio LLM fallback. Older local `.env`
+files that still contain `PADDLEOCR_ACCESS_TOKEN` continue to work as a legacy
+fallback, but new setup should use the AI Studio name.
 
 For comic/manga conversion, install or clone KCC:
 
@@ -159,6 +170,10 @@ Document jobs have two parser controls:
 - `OCR path`: keep `Auto retry` for normal use. `Full PDF only` is useful when
   you want to test Baidu's direct PDF parser. `Rendered pages` skips full-PDF
   upload and sends locally rendered page images one by one.
+- `Math repair`: `Off`, `Gemini`, `Baidu AI Studio`, or either fallback chain.
+  The selected provider is called only for formulas that fail local MathJax
+  conversion. Plain EPUB repairs target PNG rendering; Kobo KEPUB repairs target
+  MathML conversion.
 
 Comic jobs have two KCC controls:
 
@@ -169,23 +184,39 @@ Comic jobs have two KCC controls:
 
 ## Math And Kobo
 
-The default math strategy is PNG-first:
+The document converter now uses two math strategies:
 
-- Baidu/Paddle TeX snippets such as `$N = 6$` are rendered locally with MathJax
-  and Sharp.
-- Common Baidu/LaTeX quirks such as `\tag*{...}` and `\boldsymbol{...}` are
-  repaired before rendering.
-- The rendered PNG is embedded inline or as a display equation.
-- The original TeX is preserved in the image `alt` text.
-- If a formula still cannot render, the EPUB keeps the TeX visibly as source
-  text instead of dropping it or emitting broken markup.
-- The `.kepub.epub` checkbox creates a second file with Kobo's sideload
-  extension so you can test Kobo's stock renderer on the Clara Colour.
+- Plain `.epub`: Baidu/Paddle TeX snippets such as `$N = 6$` are rendered
+  locally with MathJax and Sharp, then embedded as PNG images.
+- Kobo `.kepub.epub`: formulas are converted from TeX to native MathML and the
+  XHTML manifest entries are marked with `properties="mathml"`.
+- Local syntax guessing is disabled. The first render pass uses the OCR formula
+  exactly as returned.
+- If a formula does not compile or convert to MathML and `Math repair` is
+  enabled, all failed formulas for that job are sent together in one strict JSON
+  request to Gemini, Baidu AI Studio, or the selected fallback chain.
+- AI repair candidates must pass MathJax before they are embedded.
+- Plain EPUB preserves the original TeX in image `alt` text.
+- If a formula still cannot render, the EPUB keeps the original TeX visibly as
+  source text instead of dropping it or emitting broken markup.
+- The `Create Kobo MathML .kepub.epub` checkbox builds a second file; it is not
+  a byte-for-byte copy of the PNG EPUB.
+
+Useful math-repair env defaults:
+
+```sh
+LOCAL_MATH_REPAIR_PROVIDER=off
+LOCAL_LLM_REQUEST_TIMEOUT_SECONDS=60
+LOCAL_LLM_MAX_FAILED_FORMULAS_PER_JOB=200
+```
+
+Set `LOCAL_MATH_REPAIR_PROVIDER=gemini_baidu` if you want the upload form to
+default to Gemini first and Baidu AI Studio fallback.
 
 Kobo's public EPUB spec says MathML is supported on Kobo eInk readers and that
-using `.kepub.epub` invokes Kobo's WebKit-based reader path. KOReader is still
-best treated as uneven for MathML, so the converter does not depend on MathML
-rendering for readability.
+using `.kepub.epub` invokes Kobo's WebKit-based reader path. For KOReader or
+non-Kobo readers, prefer the plain EPUB with PNG math unless you specifically
+want to test MathML.
 
 ## Limits
 
@@ -245,6 +276,7 @@ python scripts/smoke-local.py \
   --pdf testsets/pdfs/attention-all-you-need.pdf \
   --mode live \
   --allow-small \
+  --math-repair gemini_baidu \
   --kepub \
   --epubcheck
 ```

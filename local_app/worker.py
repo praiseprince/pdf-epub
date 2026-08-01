@@ -15,6 +15,7 @@ from .conversion_options import (
 )
 from .database import JobRecord, JobStore, utc_now
 from .epub_builder import build_epub, write_raw_result
+from .llm_repair import MathRepairClient
 from .parser_options import ParserModel, normalize_parser_model, normalize_parser_strategy
 from .paths import job_dirs, job_epub_dir, job_ocr_dir, job_pages_dir
 from .paddle_client import PaddleClient, PaddleClientError
@@ -176,8 +177,8 @@ class JobWorker:
             )
             build_snapshot_paths = cover_snapshot_paths
             page_bundle = add_page_snapshots(build_snapshot_paths)
-            bundle = merge_bundles(ocr_bundle, page_bundle)
-            bundle.warnings.extend(ocr_notes)
+            base_bundle = merge_bundles(ocr_bundle, page_bundle)
+            base_bundle.warnings.extend(ocr_notes)
 
             output_path = job_epub_dir(self.settings, job_id) / f"{Path(job.source_filename).stem}.epub"
             build_result = build_epub(
@@ -186,14 +187,29 @@ class JobWorker:
                 author=job.author,
                 original_filename=job.source_filename,
                 raw_result=raw_result,
-                bundle=bundle,
+                bundle=merge_bundles(base_bundle),
                 snapshot_paths=build_snapshot_paths,
                 snapshot_source_dir=job_pages_dir(self.settings, job_id),
                 assets_source_dir=ocr_assets_dir,
+                math_repairer=MathRepairClient(self.settings, job.math_repair_provider),
+                math_output="png",
             )
             if job.create_kepub:
                 kepub_path = output_path.with_name(f"{output_path.stem}.kepub.epub")
-                shutil.copyfile(output_path, kepub_path)
+                kepub_result = build_epub(
+                    output_path=kepub_path,
+                    title=job.title,
+                    author=job.author,
+                    original_filename=job.source_filename,
+                    raw_result=raw_result,
+                    bundle=merge_bundles(base_bundle),
+                    snapshot_paths=build_snapshot_paths,
+                    snapshot_source_dir=job_pages_dir(self.settings, job_id),
+                    assets_source_dir=ocr_assets_dir,
+                    math_repairer=MathRepairClient(self.settings, job.math_repair_provider),
+                    math_output="mathml",
+                )
+                build_result.warnings.extend(kepub_result.warnings)
 
             final_message = "EPUB is ready."
             if ocr_notes:

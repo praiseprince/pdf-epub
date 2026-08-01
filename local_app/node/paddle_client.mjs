@@ -61,7 +61,7 @@ async function readJsonStdin() {
 
 function client() {
   return new PaddleOCRClient({
-    token: process.env.PADDLEOCR_ACCESS_TOKEN,
+    token: process.env.BAIDU_AI_STUDIO_API_KEY || process.env.PADDLEOCR_ACCESS_TOKEN,
     requestTimeout: intEnv("PADDLEOCR_REQUEST_TIMEOUT_MS", 300_000),
     pollTimeout: intEnv("PADDLEOCR_POLL_TIMEOUT_MS", 3_600_000),
   });

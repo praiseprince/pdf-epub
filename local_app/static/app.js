@@ -137,7 +137,8 @@ function modeLabel(job) {
     const output = (job.comic_output_format || "").toUpperCase();
     return ["Comic", output, comicLayoutLabel(job.comic_layout)].filter(Boolean).join(" · ");
   }
-  return [job.parser_model, strategyLabel(job.parser_strategy)].filter(Boolean).join(" · ");
+  const mathRepair = job.math_repair_provider && job.math_repair_provider !== "off" ? job.math_repair_label : "";
+  return [job.parser_model, strategyLabel(job.parser_strategy), mathRepair].filter(Boolean).join(" · ");
 }
 
 function comicLayoutLabel(layout) {

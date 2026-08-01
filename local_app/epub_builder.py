@@ -8,14 +8,14 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import bleach
 from bs4 import BeautifulSoup
 from markdown_it import MarkdownIt
 
 from .assets import AssetBundle, normalize_asset_key
-from .math_render import MathRenderer, collect_math_tokens, rewrite_math
+from .math_render import MathMLRenderer, MathRenderer, MathRepairer, collect_math_tokens, rewrite_math
 
 
 @dataclass
@@ -40,9 +40,11 @@ figcaption { font-size: 0.9em; line-height: 1.35; margin-top: 0.4em; }
 .page-snapshot { margin: 0 0 1.2em; }
 .page-snapshot img { width: 100%; max-width: 100%; }
 .ocr-text { border-top: 1px solid #aaa; margin-top: 1em; padding-top: 0.8em; }
-.math-inline { display: inline; margin: 0 0.08em; vertical-align: -0.28em; max-height: 1.7em; }
-.math-block { text-align: center; overflow-x: auto; margin: 1em 0; }
-.math-block img { display: inline-block; max-width: 100%; }
+.math-inline { display: inline-block; margin: 0 0.08em; vertical-align: -0.32em; max-height: 1.75em; width: auto; }
+.math-block { text-align: center; margin: 1.05em 0; page-break-inside: avoid; break-inside: avoid; }
+.math-display { background: #fff; display: block; height: auto; margin: 0.4em auto; max-width: 100%; }
+.mathml-inline math { display: inline; }
+.mathml-block math { display: block; margin: 0.45em auto; max-width: 100%; }
 .math-source { font-family: serif; white-space: pre-wrap; }
 table { border-collapse: collapse; width: 100%; max-width: 100%; margin: 1em 0; font-size: 0.92em; }
 th, td { border: 1px solid #999; padding: 0.3em 0.45em; vertical-align: top; }
@@ -73,10 +75,43 @@ ALLOWED_TAGS = {
     "hr",
     "img",
     "li",
+    "maligngroup",
+    "malignmark",
+    "math",
+    "menclose",
+    "merror",
+    "mfenced",
+    "mfrac",
+    "mglyph",
+    "mi",
+    "mlabeledtr",
+    "mmultiscripts",
+    "mn",
+    "mo",
+    "mover",
+    "mpadded",
+    "mprescripts",
+    "mroot",
+    "mrow",
+    "ms",
+    "mspace",
+    "msqrt",
+    "mstyle",
+    "msub",
+    "msubsup",
+    "msup",
+    "mtable",
+    "mtd",
+    "mtext",
+    "mtr",
+    "munder",
+    "munderover",
+    "none",
     "ol",
     "p",
     "pre",
     "section",
+    "semantics",
     "span",
     "strong",
     "sub",
@@ -91,8 +126,65 @@ ALLOWED_TAGS = {
     "ul",
 }
 
+MATHML_ATTRIBUTES = [
+    "accent",
+    "accentunder",
+    "align",
+    "alttext",
+    "bevelled",
+    "class",
+    "close",
+    "columnalign",
+    "columnlines",
+    "columnspacing",
+    "columnspan",
+    "data-mjx-texclass",
+    "denomalign",
+    "depth",
+    "dir",
+    "display",
+    "displaystyle",
+    "encoding",
+    "fence",
+    "form",
+    "height",
+    "href",
+    "id",
+    "largeop",
+    "linethickness",
+    "lspace",
+    "mathbackground",
+    "mathcolor",
+    "mathsize",
+    "mathvariant",
+    "maxsize",
+    "minsize",
+    "movablelimits",
+    "notation",
+    "numalign",
+    "open",
+    "rowalign",
+    "rowlines",
+    "rowspacing",
+    "rowspan",
+    "rspace",
+    "scriptlevel",
+    "scriptminsize",
+    "scriptsizemultiplier",
+    "selection",
+    "separator",
+    "separators",
+    "stretchy",
+    "subscriptshift",
+    "supscriptshift",
+    "symmetric",
+    "title",
+    "width",
+    "xmlns",
+]
+
 ALLOWED_ATTRIBUTES = {
-    "*": ["class", "id", "title"],
+    "*": MATHML_ATTRIBUTES,
     "a": ["href", "title"],
     "img": ["src", "alt", "title", "width", "height"],
     "td": ["colspan", "rowspan"],
@@ -113,6 +205,8 @@ def build_epub(
     snapshot_paths: list[Path],
     snapshot_source_dir: Path,
     assets_source_dir: Path,
+    math_repairer: MathRepairer | None = None,
+    math_output: Literal["png", "mathml"] = "png",
 ) -> EpubBuildResult:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     warnings = list(bundle.warnings)
@@ -121,7 +215,11 @@ def build_epub(
 
     pages = _result_pages(raw_result)
     markdown_pages = [str(page.get("markdownText", "")) for page in pages]
-    math_renderer = MathRenderer(assets_source_dir / "math")
+    math_renderer = (
+        MathMLRenderer(repairer=math_repairer)
+        if math_output == "mathml"
+        else MathRenderer(assets_source_dir / "math", repairer=math_repairer)
+    )
     math_bundle = math_renderer.render_many(collect_math_tokens(markdown_pages), warnings)
     bundle.image_map.update(math_bundle.image_map)
     bundle.manifest_items.update(math_bundle.manifest_items)
@@ -153,12 +251,14 @@ def build_epub(
 
         body_parts.append("</section>")
         filename = f"text/page-{page_number:04d}.xhtml"
+        content = xhtml_document(f"{title} - Page {page_number}", "\n".join(body_parts))
         chapters.append(
             {
                 "id": f"page-{page_number}",
                 "title": f"Page {page_number}",
                 "filename": filename,
-                "content": xhtml_document(f"{title} - Page {page_number}", "\n".join(body_parts)),
+                "content": content,
+                "properties": "mathml" if "<math " in content else "",
             }
         )
 
@@ -320,7 +420,10 @@ def package_document(
     modified = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     identifier = f"urn:uuid:{uuid.uuid4()}"
     chapter_items = "\n".join(
-        f'<item id="{_xml_attr(chapter["id"])}" href="{_xml_attr(chapter["filename"])}" media-type="application/xhtml+xml" />'
+        (
+            f'<item id="{_xml_attr(chapter["id"])}" href="{_xml_attr(chapter["filename"])}" '
+            f'media-type="application/xhtml+xml"{_manifest_properties(chapter.get("properties", ""))} />'
+        )
         for chapter in chapters
     )
     spine = "\n".join(f'<itemref idref="{_xml_attr(chapter["id"])}" />' for chapter in chapters)
@@ -425,6 +528,11 @@ def _xml(value: str) -> str:
 
 def _xml_attr(value: str) -> str:
     return html.escape(value, quote=True)
+
+
+def _manifest_properties(value: str) -> str:
+    cleaned = " ".join(part for part in value.split() if re.fullmatch(r"[A-Za-z0-9_-]+", part))
+    return f' properties="{_xml_attr(cleaned)}"' if cleaned else ""
 
 
 def write_raw_result(path: Path, raw_result: dict[str, Any]) -> None:

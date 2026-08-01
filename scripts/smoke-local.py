@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from local_app.config import Settings
 from local_app.database import JobStore
+from local_app.llm_options import normalize_math_repair_provider
 from local_app.paths import ensure_data_dirs, job_upload_dir
 from local_app.pdf_tools import pdfinfo
 from local_app.worker import JobWorker
@@ -25,6 +26,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--conversion-mode", choices=["document", "comic"], default="document")
     parser.add_argument("--comic-output-format", choices=["kepub", "epub", "cbz"], default="kepub")
     parser.add_argument("--comic-layout", choices=["manga", "comic", "webtoon"], default="webtoon")
+    parser.add_argument(
+        "--math-repair",
+        choices=["off", "gemini", "baidu", "gemini_baidu", "baidu_gemini"],
+        default="off",
+    )
     parser.add_argument("--snapshot-dpi", type=int, default=96)
     parser.add_argument("--allow-small", action="store_true", help="Allow PDFs under 100 pages.")
     parser.add_argument("--epubcheck", action="store_true", help="Run EPUBCheck when EPUBCHECK_JAR is available.")
@@ -85,6 +91,7 @@ def main() -> int:
         conversion_mode=args.conversion_mode,
         comic_output_format=args.comic_output_format,
         comic_layout=args.comic_layout,
+        math_repair_provider=normalize_math_repair_provider(args.math_repair) if args.conversion_mode == "document" else "off",
         source_path=target_pdf,
     )
     worker._process_job(job.id)
