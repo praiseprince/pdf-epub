@@ -65,7 +65,9 @@ npm install
 python scripts/generate-local-secrets.py "1234"
 ```
 
-Create `.env` from `.env.example`, then fill in:
+Create `.env` from `.env.example`, then fill in the secrets. For normal
+private use, `.env` can contain only `APP_PIN_HASH`, `SESSION_SECRET`, and
+`BAIDU_AI_STUDIO_API_KEY`; every other setting below has the shown default.
 
 ```sh
 APP_PIN_HASH=
@@ -73,12 +75,24 @@ SESSION_SECRET=
 BAIDU_AI_STUDIO_API_KEY=
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.1-flash-lite
+BAIDU_AI_STUDIO_BASE_URL=https://aistudio.baidu.com/llm/lmapi/v3
 BAIDU_AI_STUDIO_MODEL=ernie-4.5-turbo-128k
+LOCAL_DATA_DIR=data
+LOCAL_HOST=127.0.0.1
+LOCAL_PORT=8000
+LOCAL_PADDLE_MODE=live
 LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
+LOCAL_INCLUDE_PAGE_SNAPSHOTS=true
 LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=500
 LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_RETRIES=2
+LOCAL_PADDLE_POLL_SECONDS=5
+LOCAL_WORKER_POLL_SECONDS=1
+LOCAL_CREATE_KEPUB_DEFAULT=false
+LOCAL_SNAPSHOT_DPI=120
 LOCAL_MATH_REPAIR_PROVIDER=off
+LOCAL_LLM_REQUEST_TIMEOUT_SECONDS=60
+LOCAL_LLM_MAX_FAILED_FORMULAS_PER_JOB=200
 LOCAL_KCC_SOURCE_DIR=tmp/kcc-source-work
 ```
 
@@ -241,6 +255,15 @@ OCR timeout controls:
 - `LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS`: how long each rendered page upload
   can take.
 - `LOCAL_PADDLE_PAGE_SUBMIT_RETRIES`: rendered-page upload attempts per page.
+
+The slowest path is Auto retry on large, image-heavy PDFs. The worker first
+waits up to `LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS` for Baidu to accept the full
+PDF. If that times out, it renders the pages locally and sends them to Baidu one
+at a time, with up to `LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS` per page and
+`LOCAL_PADDLE_PAGE_SUBMIT_RETRIES` attempts. This preserves a chance to use the
+better full-PDF parser, but it can add several minutes before fallback even
+starts. Use `OCR path: Rendered pages` to skip the initial full-PDF wait for
+PDFs that repeatedly time out on full submit.
 
 ## Test Set
 
