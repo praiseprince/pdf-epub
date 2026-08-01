@@ -11,7 +11,7 @@ import { submitPaddleDocument, mapPaddleError } from "@/lib/paddle/client";
 import { inspectPdfBytes } from "@/lib/pdf/inspect";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 240;
 
 const submitSchema = z.object({
   uploadToken: z.string().min(1),

@@ -22,11 +22,11 @@ const DEFAULT_OPTIONS = {
   relevelTitles: true
 } satisfies PaddleOCRVLOptions;
 
-function client() {
+function client(requestTimeout = 60_000, pollTimeout = 300_000) {
   return new PaddleOCRClient({
     token: readRequiredEnv("PADDLEOCR_ACCESS_TOKEN"),
-    requestTimeout: 60_000,
-    pollTimeout: 300_000
+    requestTimeout,
+    pollTimeout
   });
 }
 
@@ -52,20 +52,21 @@ async function withPaddleRetries<T>(operation: () => Promise<T>, attempts = 3): 
 
 export async function submitPaddleDocument(fileUrl: string): Promise<Job> {
   return withPaddleRetries(() =>
-    client().submitDocumentParsing({
+    client(90_000, 90_000).submitDocumentParsing({
       fileUrl,
       model: Model.PaddleOCRVL16,
       options: DEFAULT_OPTIONS
-    })
+    }),
+    2
   );
 }
 
 export async function getPaddleStatus(jobId: string): Promise<JobStatus> {
-  return withPaddleRetries(() => client().getStatus(jobId), 2);
+  return withPaddleRetries(() => client(10_000, 10_000).getStatus(jobId), 2);
 }
 
 export async function getPaddleDocumentResult(jobId: string): Promise<DocParsingResult> {
-  return withPaddleRetries(() => client().waitDocumentParsingResult(jobId), 2);
+  return withPaddleRetries(() => client(120_000, 120_000).waitDocumentParsingResult(jobId), 2);
 }
 
 export function mapPaddleError(error: unknown) {
