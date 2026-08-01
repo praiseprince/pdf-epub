@@ -26,11 +26,13 @@ export async function signSessionToken(
   maxAgeSeconds = SESSION_MAX_AGE_SECONDS
 ) {
   const jti = randomUUID();
+  const expirationTime =
+    maxAgeSeconds <= 0 ? Math.floor(Date.now() / 1000) + maxAgeSeconds : `${maxAgeSeconds}s`;
 
   return new SignJWT({ kind: "session", jti })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(`${maxAgeSeconds}s`)
+    .setExpirationTime(expirationTime)
     .sign(keyFromSecret(secret));
 }
 
@@ -41,4 +43,3 @@ export async function verifySessionToken(token: string, secret: string) {
 
   return sessionClaimsSchema.parse(payload);
 }
-
