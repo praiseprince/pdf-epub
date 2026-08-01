@@ -24,7 +24,7 @@ export async function inspectPdfBytes(bytes: Uint8Array, pageLimit = maxPdfPages
     });
     const pageCount = pdf.getPageCount();
 
-    if (pageCount > pageLimit) {
+    if (Number.isFinite(pageLimit) && pageCount > pageLimit) {
       return { ok: false, message: "This PDF exceeds the page limit." };
     }
 
@@ -38,4 +38,3 @@ export async function inspectPdfBytes(bytes: Uint8Array, pageLimit = maxPdfPages
     return { ok: false, message: "This file is not a valid PDF." };
   }
 }
-

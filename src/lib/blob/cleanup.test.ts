@@ -18,6 +18,22 @@ describe("temporary Blob cleanup", () => {
           etag: ""
         },
         {
+          pathname: "tmp/123e4567-e89b-12d3-a456-426614174000/finalize-state.json",
+          uploadedAt: old,
+          size: 1,
+          url: "",
+          downloadUrl: "",
+          etag: ""
+        },
+        {
+          pathname: "tmp/123e4567-e89b-12d3-a456-426614174000/text/chapter-1.xhtml",
+          uploadedAt: old,
+          size: 1,
+          url: "",
+          downloadUrl: "",
+          etag: ""
+        },
+        {
           pathname: "tmp/123e4567-e89b-12d3-a456-426614174000/result.epub",
           uploadedAt: fresh,
           size: 1,
@@ -45,6 +61,10 @@ describe("temporary Blob cleanup", () => {
       now
     );
 
-    expect(expired).toEqual(["tmp/123e4567-e89b-12d3-a456-426614174000/source.pdf"]);
+    expect(expired).toEqual([
+      "tmp/123e4567-e89b-12d3-a456-426614174000/source.pdf",
+      "tmp/123e4567-e89b-12d3-a456-426614174000/finalize-state.json",
+      "tmp/123e4567-e89b-12d3-a456-426614174000/text/chapter-1.xhtml"
+    ]);
   });
 });

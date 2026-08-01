@@ -1,20 +1,22 @@
-import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { deleteJobBlobs } from "@/lib/blob/cleanup";
-import { resultEpubPath } from "@/lib/blob/paths";
-import { createSignedGetUrl } from "@/lib/blob/signed-url";
-import { buildEpubFromPaddleResult } from "@/lib/epub/build";
+import { runChunkedFinalizeStep } from "@/lib/epub/chunked-finalize";
 import { jsonError, requireSession } from "@/lib/http/api";
 import { verifyJobToken } from "@/lib/jobs/tokens";
 import { getPaddleDocumentResult, mapPaddleError } from "@/lib/paddle/client";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 120;
 
 const finalizeSchema = z.object({
   jobToken: z.string().min(1)
 });
+
+class PaddleResultError extends Error {
+  constructor(readonly originalError: unknown) {
+    super("PaddleOCR result could not be loaded.");
+  }
+}
 
 export async function POST(request: Request) {
   const unauthorized = await requireSession();
@@ -32,42 +34,20 @@ export async function POST(request: Request) {
     return jsonError("The conversion expired.", 401);
   }
 
-  let paddleResult;
   try {
-    paddleResult = await getPaddleDocumentResult(jobClaims.paddleJobId);
+    const result = await runChunkedFinalizeStep(jobClaims, async () => {
+      try {
+        return await getPaddleDocumentResult(jobClaims.paddleJobId);
+      } catch (error) {
+        throw new PaddleResultError(error);
+      }
+    });
+    return NextResponse.json(result);
   } catch (error) {
-    const publicError = mapPaddleError(error);
-    return NextResponse.json({ error: publicError.message }, { status: publicError.status });
-  }
-
-  let epub;
-  try {
-    epub = await buildEpubFromPaddleResult(paddleResult, {
-      title: jobClaims.title ?? jobClaims.originalFilename.replace(/\.pdf$/i, ""),
-      ...(jobClaims.author ? { author: jobClaims.author } : {}),
-      originalFilename: jobClaims.originalFilename
-    });
-  } catch {
-    return jsonError("EPUB generation failed.", 500);
-  }
-
-  const outputPath = resultEpubPath(jobClaims.jobId);
-  try {
-    await put(outputPath, epub.buffer, {
-      access: "private",
-      contentType: "application/epub+zip",
-      allowOverwrite: true,
-      cacheControlMaxAge: 60 * 60
-    });
-    const downloadUrl = await createSignedGetUrl(outputPath, 60 * 60 * 1000);
-    await deleteJobBlobs(jobClaims.jobId, false).catch(() => undefined);
-
-    return NextResponse.json({
-      downloadUrl,
-      warnings: epub.warnings,
-      outputPath
-    });
-  } catch {
+    if (error instanceof PaddleResultError) {
+      const publicError = mapPaddleError(error.originalError);
+      return NextResponse.json({ error: publicError.message }, { status: publicError.status });
+    }
     return jsonError("EPUB generation failed.", 500);
   }
 }

@@ -29,6 +29,7 @@ be checked again after a reload or browser restart.
   `@paddleocr/api-sdk`
 - Stateless signed job tokens, no database
 - Browser-only saved jobs panel for reload/restart recovery
+- Blob-backed chunked EPUB finalization to avoid one large timeout-prone build
 - Markdown AST normalization before EPUB generation
 - EPUB 3 output with text, headings, links, lists, footnotes, tables, figures,
   captions, internal images, and MathJax SVG formula rendering
@@ -77,12 +78,19 @@ PADDLEOCR_ACCESS_TOKEN=
 BLOB_READ_WRITE_TOKEN=
 CRON_SECRET=
 
-MAX_PDF_SIZE_MB=50
-MAX_PDF_PAGES=100
+MAX_PDF_SIZE_MB=0
+MAX_PDF_PAGES=0
 JOB_EXPIRATION_MINUTES=60
-MAX_IMAGE_SIZE_MB=20
-MAX_TOTAL_ASSET_MB=300
+MAX_IMAGE_SIZE_MB=0
+MAX_TOTAL_ASSET_MB=0
+FINALIZE_IMAGE_PAGE_BATCH=5
+FINALIZE_CHAPTER_BATCH=5
 ```
+
+For `MAX_PDF_SIZE_MB`, `MAX_PDF_PAGES`, `MAX_IMAGE_SIZE_MB`, and
+`MAX_TOTAL_ASSET_MB`, set `0`, `none`, `off`, or `unlimited` to disable the
+app-level cap. This does not remove upstream limits from the browser, Vercel
+Blob, Vercel Functions, PaddleOCR, available memory, or your PaddleOCR quota.
 
 Generate the PIN hash and secrets:
 
@@ -198,6 +206,8 @@ Temporary Blob paths are restricted to:
 
 ```text
 tmp/<job-uuid>/source.pdf
+tmp/<job-uuid>/finalize-state.json
+tmp/<job-uuid>/text/...
 tmp/<job-uuid>/assets/...
 tmp/<job-uuid>/result.epub
 ```
@@ -219,16 +229,20 @@ and environment variables.
 
 ## Current Limits
 
-Defaults are configurable:
+Defaults are configurable. The checked-in example disables app-level document
+and asset caps:
 
-- `MAX_PDF_SIZE_MB=50`
-- `MAX_PDF_PAGES=100`
+- `MAX_PDF_SIZE_MB=0`
+- `MAX_PDF_PAGES=0`
 - `JOB_EXPIRATION_MINUTES=60`
-- `MAX_IMAGE_SIZE_MB=20`
-- `MAX_TOTAL_ASSET_MB=300`
+- `MAX_IMAGE_SIZE_MB=0`
+- `MAX_TOTAL_ASSET_MB=0`
+- `FINALIZE_IMAGE_PAGE_BATCH=5`
+- `FINALIZE_CHAPTER_BATCH=5`
 
-These are conservative personal-use limits intended to keep finalization inside
-Vercel Hobby Function duration and Blob usage limits.
+Use finite values if you want guardrails. With caps disabled, the app still uses
+a finite Vercel Blob upload-token ceiling and still depends on external
+platform limits.
 
 ## Reloads And Long Jobs
 
@@ -239,19 +253,24 @@ resume, refresh a download link, or delete jobs that are still within
 
 Closing the page during the direct upload cannot resume that upload because no
 PaddleOCR job exists yet. After submission, OCR runs asynchronously at
-PaddleOCR; the browser only polls status. The Vercel timeout-sensitive parts are
-submission and final EPUB generation:
+PaddleOCR; the browser only polls status. Final EPUB generation is chunked:
+each `/api/jobs/finalize` call prepares a bounded batch of image pages or
+chapters, stores staged XHTML/assets in private Blob storage, and returns
+progress. The browser keeps calling it until the final call streams the EPUB ZIP
+to Blob and returns a download URL.
+
+The Vercel timeout-sensitive parts are now:
 
 - `/api/jobs/submit` is configured for 240 seconds
-- `/api/jobs/finalize` is configured for 300 seconds
+- `/api/jobs/finalize` is configured for 120 seconds per chunk
 - `/api/jobs/status` is short polling and is configured for 30 seconds
 
-For 50-100 page papers, OCR waiting can continue across reloads as long as the
-job token has not expired. The bigger risk is finalization: very image-heavy or
-formula-heavy documents can produce enough Markdown, images, and MathJax work
-to exceed the 300 second Hobby Function cap. If that happens regularly, reduce
-`MAX_PDF_PAGES`, split very large PDFs, or move the finalization step to a
-longer-running worker or a paid Vercel plan with a longer Function duration.
+For long papers, OCR waiting and EPUB finalization can continue across reloads
+as long as the job token has not expired. Extremely large PDFs can still fail if
+PaddleOCR rejects them, your quota runs out, Blob storage is exhausted, or the
+final packaging step itself becomes too large for a single Function. If that
+happens regularly, reduce `FINALIZE_*_BATCH`, split very large PDFs, use Vercel
+Workflows, or move packaging to a dedicated worker.
 
 ## Test
 
@@ -264,6 +283,15 @@ npm test
 npm run sample-epub -- tmp/sample.epub
 npm run build
 npm audit --audit-level=high
+```
+
+Run a local 150-page stress test for the chunked finalizer. This requires
+`BLOB_READ_WRITE_TOKEN`, writes `tmp/stress-150-page.pdf` and
+`tmp/stress-150-page.epub`, and deletes temporary Blob objects after copying the
+EPUB back locally:
+
+```sh
+npm run stress-chunked-finalize
 ```
 
 Prepare a local stress corpus of open-access papers, HTML-printed PDFs, and a

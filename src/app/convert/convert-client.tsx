@@ -17,7 +17,7 @@ type Stage = "idle" | "uploading" | "uploaded" | "submitting" | "reading" | "bui
 
 type SubmitResponse = {
   jobToken: string;
-  pageCount: number;
+  pageCount: number | null;
   stage: string;
 };
 
@@ -30,6 +30,27 @@ type StatusResponse = {
   } | null;
   error?: string;
 };
+
+type BuildProgress = {
+  label: string;
+  processed: number;
+  total: number;
+};
+
+type FinalizeResponse =
+  | {
+      state: "building";
+      stage: string;
+      progress: BuildProgress;
+      warnings: string[];
+    }
+  | {
+      state: "ready";
+      stage: string;
+      progress: BuildProgress;
+      downloadUrl: string;
+      warnings: string[];
+    };
 
 type SavedJobState = "submitted" | "running" | "building" | "ready" | "failed" | "expired";
 
@@ -46,6 +67,7 @@ type SavedJob = {
   stage: string;
   pageCount: number | null;
   progress: StatusResponse["progress"];
+  buildProgress: BuildProgress | null;
   downloadUrl?: string;
   warnings: string[];
   error?: string;
@@ -135,6 +157,26 @@ function parseProgress(value: unknown): StatusResponse["progress"] {
   };
 }
 
+function parseBuildProgress(value: unknown): BuildProgress | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (
+    typeof value.label !== "string" ||
+    typeof value.processed !== "number" ||
+    typeof value.total !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    label: value.label,
+    processed: value.processed,
+    total: value.total
+  };
+}
+
 function savedJobFromToken(jobToken: string, fallback: SavedJobFallback = {}): SavedJob {
   const claims = decodeJobClaims(jobToken);
   const now = Date.now();
@@ -156,6 +198,7 @@ function savedJobFromToken(jobToken: string, fallback: SavedJobFallback = {}): S
     stage: fallback.stage ?? "Submitted to PaddleOCR",
     pageCount: fallback.pageCount ?? null,
     progress: fallback.progress ?? null,
+    buildProgress: fallback.buildProgress ?? null,
     ...(downloadUrl ? { downloadUrl } : {}),
     warnings: fallback.warnings ?? [],
     ...(error ? { error } : {})
@@ -179,6 +222,7 @@ function normalizeSavedJob(value: unknown): SavedJob | null {
     stage: typeof value.stage === "string" ? value.stage : undefined,
     pageCount: typeof value.pageCount === "number" ? value.pageCount : null,
     progress: parseProgress(value.progress),
+    buildProgress: parseBuildProgress(value.buildProgress),
     downloadUrl: typeof value.downloadUrl === "string" ? value.downloadUrl : undefined,
     warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning) => typeof warning === "string") : [],
     error: typeof value.error === "string" ? value.error : undefined
@@ -314,6 +358,7 @@ export function ConvertClient() {
   const [uploadToken, setUploadToken] = useState("");
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [paddleProgress, setPaddleProgress] = useState<StatusResponse["progress"]>(null);
+  const [buildProgress, setBuildProgress] = useState<BuildProgress | null>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
   const [jobToken, setJobToken] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -362,6 +407,7 @@ export function ConvertClient() {
     setUploadedBlob(null);
     setPageCount(null);
     setPaddleProgress(null);
+    setBuildProgress(null);
     setDownloadUrl("");
     setJobToken("");
     setUploadToken("");
@@ -474,6 +520,7 @@ export function ConvertClient() {
         author,
         pageCount: submitted.pageCount,
         progress: null,
+        buildProgress: null,
         state: "submitted",
         stage: submitted.stage,
         warnings: []
@@ -508,6 +555,7 @@ export function ConvertClient() {
 
   async function pollStatus(jobToken: string, signal: AbortSignal) {
     setStage("reading");
+    setBuildProgress(null);
     upsertSavedJob(jobToken, {
       state: "running",
       stage: "Reading document",
@@ -576,39 +624,58 @@ export function ConvertClient() {
       stage: "Building EPUB",
       error: undefined
     });
-    const response = await fetch("/api/jobs/finalize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal,
-      body: JSON.stringify({ jobToken })
-    });
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      const publicError = body?.error ?? "EPUB generation failed.";
-      setError(publicError);
-      upsertSavedJob(jobToken, {
-        state: response.status === 401 ? "expired" : "failed",
-        stage: response.status === 401 ? "Expired" : "EPUB generation failed",
-        error: publicError
+    while (true) {
+      const response = await fetch("/api/jobs/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({ jobToken })
       });
-      return;
-    }
 
-    const body = (await response.json()) as {
-      downloadUrl: string;
-      warnings: string[];
-    };
-    setDownloadUrl(body.downloadUrl);
-    setWarnings(body.warnings);
-    setStage("ready");
-    upsertSavedJob(jobToken, {
-      state: "ready",
-      stage: "Ready to download",
-      downloadUrl: body.downloadUrl,
-      warnings: body.warnings,
-      error: undefined
-    });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        const publicError = body?.error ?? "EPUB generation failed.";
+        setError(publicError);
+        upsertSavedJob(jobToken, {
+          state: response.status === 401 ? "expired" : "failed",
+          stage: response.status === 401 ? "Expired" : "EPUB generation failed",
+          error: publicError
+        });
+        return;
+      }
+
+      const body = (await response.json()) as FinalizeResponse;
+      setWarnings(body.warnings);
+      setBuildProgress(body.progress);
+
+      if (body.state === "ready") {
+        setDownloadUrl(body.downloadUrl);
+        setStage("ready");
+        upsertSavedJob(jobToken, {
+          state: "ready",
+          stage: "Ready to download",
+          buildProgress: body.progress,
+          downloadUrl: body.downloadUrl,
+          warnings: body.warnings,
+          error: undefined
+        });
+        return;
+      }
+
+      upsertSavedJob(jobToken, {
+        state: "building",
+        stage: body.stage,
+        buildProgress: body.progress,
+        warnings: body.warnings,
+        error: undefined
+      });
+
+      await waitForPoll(800, signal);
+      if (signal.aborted) {
+        return;
+      }
+    }
   }
 
   async function refreshDownloadUrl(nextJobToken: string, signal: AbortSignal) {
@@ -650,7 +717,8 @@ export function ConvertClient() {
         setAuthor(savedJob.author ?? "");
         setPageCount(savedJob.pageCount);
         setPaddleProgress(savedJob.progress);
-        setWarnings(savedJob.warnings);
+        setBuildProgress(savedJob.buildProgress);
+      setWarnings(savedJob.warnings);
         setStage("ready");
       }
 
@@ -658,6 +726,7 @@ export function ConvertClient() {
       upsertSavedJob(nextJobToken, {
         state: "ready",
         stage: "Ready to download",
+        buildProgress: { label: "EPUB ready", processed: 1, total: 1 },
         downloadUrl: freshDownloadUrl,
         error: undefined
       });
@@ -686,6 +755,7 @@ export function ConvertClient() {
     setAuthor(savedJob.author ?? "");
     setPageCount(savedJob.pageCount);
     setPaddleProgress(savedJob.progress);
+    setBuildProgress(savedJob.buildProgress);
     setWarnings(savedJob.warnings);
     setJobToken(savedJob.jobToken);
     jobTokenRef.current = savedJob.jobToken;
@@ -700,6 +770,7 @@ export function ConvertClient() {
           upsertSavedJob(savedJob.jobToken, {
             state: "ready",
             stage: "Ready to download",
+            buildProgress: { label: "EPUB ready", processed: 1, total: 1 },
             downloadUrl: existingDownloadUrl,
             error: undefined
           });
@@ -741,6 +812,7 @@ export function ConvertClient() {
       setUploadedBlob(null);
       setPageCount(null);
       setPaddleProgress(null);
+      setBuildProgress(null);
       setDownloadUrl("");
       setJobToken("");
       jobTokenRef.current = "";
@@ -771,11 +843,15 @@ export function ConvertClient() {
       removeSavedJob(token);
     }
     clearActiveJobToken();
+    setPageCount(null);
+    setPaddleProgress(null);
+    setBuildProgress(null);
     setDownloadUrl("");
     setJobToken("");
     setUploadToken("");
     jobTokenRef.current = "";
     uploadTokenRef.current = "";
+    setWarnings([]);
     setStage("idle");
     setUploadedBlob(null);
     setFile(null);
@@ -792,6 +868,7 @@ export function ConvertClient() {
     setUploadedBlob(null);
     setPageCount(null);
     setPaddleProgress(null);
+    setBuildProgress(null);
     setDownloadUrl("");
     setJobToken("");
     setUploadToken("");
@@ -857,6 +934,11 @@ export function ConvertClient() {
                   {savedJob.progress ? (
                     <p className="job-meta">
                       PaddleOCR has read {savedJob.progress.extractedPages} of {savedJob.progress.totalPages} pages.
+                    </p>
+                  ) : null}
+                  {savedJob.buildProgress ? (
+                    <p className="job-meta">
+                      {savedJob.buildProgress.label}: {savedJob.buildProgress.processed} of {savedJob.buildProgress.total}.
                     </p>
                   ) : null}
                   {savedJob.error ? <p className="error">{savedJob.error}</p> : null}
@@ -960,6 +1042,11 @@ export function ConvertClient() {
       {paddleProgress ? (
         <p className="notice">
           PaddleOCR has read {paddleProgress.extractedPages} of {paddleProgress.totalPages} pages.
+        </p>
+      ) : null}
+      {buildProgress ? (
+        <p className="notice">
+          {buildProgress.label}: {buildProgress.processed} of {buildProgress.total}.
         </p>
       ) : null}
       {stage === "ready" ? (

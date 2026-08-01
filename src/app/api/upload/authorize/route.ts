@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { sourcePdfPath } from "@/lib/blob/paths";
-import { maxPdfSizeBytes } from "@/lib/config/limits";
+import { maxPdfSizeBytes, maxPdfUploadBytes } from "@/lib/config/limits";
 import { hasPdfExtension, hasPdfMimeType } from "@/lib/files/pdf";
 import { sanitizeFilename } from "@/lib/files/sanitize";
 import { jsonError, requireSession } from "@/lib/http/api";
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
           return {
             allowedContentTypes: ["application/pdf", "application/x-pdf"],
-            maximumSizeInBytes: maxPdfSizeBytes(),
+            maximumSizeInBytes: maxPdfUploadBytes(),
             validUntil: Date.now() + 15 * 60 * 1000,
             addRandomSuffix: false,
             allowOverwrite: false,
@@ -91,7 +91,8 @@ export async function POST(request: Request) {
     return jsonError("This file is not a valid PDF.");
   }
 
-  if (parsed.data.size > maxPdfSizeBytes()) {
+  const sizeLimit = maxPdfSizeBytes();
+  if (Number.isFinite(sizeLimit) && parsed.data.size > sizeLimit) {
     return jsonError("This PDF exceeds the configured size limit.");
   }
 
@@ -108,7 +109,6 @@ export async function POST(request: Request) {
     jobId,
     inputPath,
     uploadToken,
-    maxSizeBytes: maxPdfSizeBytes()
+    maxSizeBytes: maxPdfUploadBytes()
   });
 }
-

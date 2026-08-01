@@ -1,7 +1,7 @@
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const SAFE_ASSET_PATTERN = "[a-zA-Z0-9._/-]+";
 const JOB_PATH_RE = new RegExp(
-  `^tmp/(${UUID_PATTERN})/(source\\.pdf|result\\.epub|assets/${SAFE_ASSET_PATTERN})$`
+  `^tmp/(${UUID_PATTERN})/(source\\.pdf|result\\.epub|finalize-state\\.json|text/${SAFE_ASSET_PATTERN}|assets/${SAFE_ASSET_PATTERN})$`
 );
 
 export function sourcePdfPath(jobId: string) {
@@ -10,6 +10,18 @@ export function sourcePdfPath(jobId: string) {
 
 export function resultEpubPath(jobId: string) {
   return `tmp/${jobId}/result.epub`;
+}
+
+export function finalizeStatePath(jobId: string) {
+  return `tmp/${jobId}/finalize-state.json`;
+}
+
+export function stagedChapterPath(jobId: string, filename: string) {
+  return `tmp/${jobId}/${filename}`;
+}
+
+export function stagedResourcePath(jobId: string, href: string) {
+  return `tmp/${jobId}/${href}`;
 }
 
 export function isValidJobBlobPath(pathname: string) {
@@ -28,4 +40,3 @@ export function jobIdFromPath(pathname: string) {
 export function assertPathBelongsToJob(pathname: string, jobId: string) {
   return isValidJobBlobPath(pathname) && jobIdFromPath(pathname) === jobId;
 }
-

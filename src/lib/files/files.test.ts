@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isValidJobBlobPath, jobIdFromPath, resultEpubPath, sourcePdfPath } from "@/lib/blob/paths";
+import {
+  finalizeStatePath,
+  isValidJobBlobPath,
+  jobIdFromPath,
+  resultEpubPath,
+  sourcePdfPath,
+  stagedChapterPath,
+  stagedResourcePath
+} from "@/lib/blob/paths";
 import { bufferHasPdfSignature, hasPdfExtension, hasPdfMimeType } from "./pdf";
 import { sanitizeFilename, sanitizeMetadataText } from "./sanitize";
 
@@ -26,6 +34,9 @@ describe("blob path validation", () => {
     expect(sourcePdfPath(jobId)).toBe(`tmp/${jobId}/source.pdf`);
     expect(resultEpubPath(jobId)).toBe(`tmp/${jobId}/result.epub`);
     expect(isValidJobBlobPath(sourcePdfPath(jobId))).toBe(true);
+    expect(isValidJobBlobPath(finalizeStatePath(jobId))).toBe(true);
+    expect(isValidJobBlobPath(stagedChapterPath(jobId, "text/chapter-1.xhtml"))).toBe(true);
+    expect(isValidJobBlobPath(stagedResourcePath(jobId, "assets/formulas/hash.svg"))).toBe(true);
     expect(isValidJobBlobPath(`tmp/${jobId}/assets/image.png`)).toBe(true);
     expect(jobIdFromPath(sourcePdfPath(jobId))).toBe(jobId);
     expect(isValidJobBlobPath(`tmp/${jobId}/../source.pdf`)).toBe(false);

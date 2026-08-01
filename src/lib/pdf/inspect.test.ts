@@ -31,5 +31,11 @@ describe("PDF inspection", () => {
       message: "This PDF exceeds the page limit."
     });
   });
-});
 
+  it("allows disabled page limits", async () => {
+    await expect(inspectPdfBytes(await samplePdf(3), Number.POSITIVE_INFINITY)).resolves.toEqual({
+      ok: true,
+      pageCount: 3
+    });
+  });
+});

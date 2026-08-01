@@ -6,7 +6,7 @@ import { sanitizeMetadataText } from "@/lib/files/sanitize";
 import { nodeText, normalizeMarkdownPages, parseMarkdown } from "./normalize";
 import { prepareImageResources } from "./images";
 import { renderRoot } from "./render";
-import { ResourceRegistry, type EpubResource } from "./resources";
+import { ResourceRegistry } from "./resources";
 import { escapeXml } from "./xml";
 
 export type EpubMetadata = {
@@ -21,15 +21,21 @@ export type EpubBuildResult = {
   warnings: string[];
 };
 
-type Chapter = {
+export type Chapter = {
   id: string;
   title: string;
   root: Root;
   filename: string;
+  pageIndexes: number[];
   content?: string;
 };
 
-const bookCss = `
+export type EpubPackageResource = {
+  href: string;
+  mediaType: string;
+};
+
+export const bookCss = `
 body {
   line-height: 1.55;
   margin: 0.8em;
@@ -52,7 +58,16 @@ code { font-family: monospace; }
 blockquote { margin: 1em 1.2em; }
 `.trim();
 
-function collectImageReferences(result: SafeDocParsingResult) {
+export function sanitizeEpubMetadata(metadataInput: EpubMetadata): EpubMetadata {
+  return {
+    title: sanitizeMetadataText(metadataInput.title, "Untitled document"),
+    author: sanitizeMetadataText(metadataInput.author),
+    language: metadataInput.language ?? "en",
+    originalFilename: sanitizeMetadataText(metadataInput.originalFilename, "document.pdf")
+  };
+}
+
+export function collectImageReferences(result: SafeDocParsingResult) {
   const refs: Record<string, string> = {};
   for (const page of result.pages) {
     Object.assign(refs, page.markdownImages, page.outputImages);
@@ -60,12 +75,26 @@ function collectImageReferences(result: SafeDocParsingResult) {
   return refs;
 }
 
-function splitChapters(markdownPages: string[]) {
+export function collectPageImageReferences(result: SafeDocParsingResult) {
+  return result.pages.map((page) => ({
+    ...page.markdownImages,
+    ...page.outputImages
+  }));
+}
+
+export function splitChapters(markdownPages: string[]) {
   const normalized = normalizeMarkdownPages(markdownPages);
   const chapters: Chapter[] = [];
   let currentChildren: Content[] = [];
+  let currentPageIndexes: number[] = [];
   let currentTitle = "Start";
   let foundHeading = false;
+
+  function markPage(index: number) {
+    if (!currentPageIndexes.includes(index)) {
+      currentPageIndexes.push(index);
+    }
+  }
 
   function pushChapter() {
     if (currentChildren.length === 0) {
@@ -77,9 +106,11 @@ function splitChapters(markdownPages: string[]) {
       id: `chapter-${chapterNumber}`,
       title: sanitizeMetadataText(currentTitle, `Chapter ${chapterNumber}`),
       root: { type: "root", children: currentChildren },
-      filename: `text/chapter-${chapterNumber}.xhtml`
+      filename: `text/chapter-${chapterNumber}.xhtml`,
+      pageIndexes: currentPageIndexes
     });
     currentChildren = [];
+    currentPageIndexes = [];
   }
 
   for (const page of normalized) {
@@ -93,6 +124,7 @@ function splitChapters(markdownPages: string[]) {
         currentTitle = nodeText(child) || `Chapter ${chapters.length + 1}`;
       }
       currentChildren.push(child);
+      markPage(page.index);
     }
 
     if (!foundHeading && currentChildren.length > 0 && (page.index + 1) % 10 === 0) {
@@ -108,14 +140,15 @@ function splitChapters(markdownPages: string[]) {
       id: "chapter-1",
       title: "Document",
       root: { type: "root", children: [] },
-      filename: "text/chapter-1.xhtml"
+      filename: "text/chapter-1.xhtml",
+      pageIndexes: []
     });
   }
 
   return chapters;
 }
 
-function xhtmlDocument(title: string, body: string) {
+export function xhtmlDocument(title: string, body: string) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en" xml:lang="en">
@@ -130,7 +163,9 @@ ${body}
 </html>`;
 }
 
-function coverDocument(metadata: Required<Pick<EpubMetadata, "title" | "originalFilename">> & Pick<EpubMetadata, "author">) {
+export function coverDocument(
+  metadata: Required<Pick<EpubMetadata, "title" | "originalFilename">> & Pick<EpubMetadata, "author">
+) {
   return xhtmlDocument(
     metadata.title,
     `<section epub:type="cover">
@@ -141,7 +176,7 @@ function coverDocument(metadata: Required<Pick<EpubMetadata, "title" | "original
   );
 }
 
-function navDocument(metadata: EpubMetadata, chapters: Chapter[]) {
+export function navDocument(metadata: EpubMetadata, chapters: Pick<Chapter, "filename" | "title">[]) {
   const items = chapters
     .map((chapter) => `<li><a href="${escapeXml(chapter.filename)}">${escapeXml(chapter.title)}</a></li>`)
     .join("");
@@ -158,11 +193,11 @@ function navDocument(metadata: EpubMetadata, chapters: Chapter[]) {
 </html>`;
 }
 
-function packageDocument(
+export function packageDocument(
   metadata: EpubMetadata,
   identifier: string,
-  chapters: Chapter[],
-  resources: EpubResource[]
+  chapters: Pick<Chapter, "id" | "filename">[],
+  resources: EpubPackageResource[]
 ) {
   const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const manifestResources = resources
@@ -203,7 +238,7 @@ function packageDocument(
 </package>`;
 }
 
-function containerXml() {
+export function containerXml() {
   return `<?xml version="1.0" encoding="utf-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
@@ -212,7 +247,7 @@ function containerXml() {
 </container>`;
 }
 
-async function zipEntries(entries: Array<{ path: string; content: Uint8Array | string; compress?: boolean }>) {
+export async function zipEntries(entries: Array<{ path: string; content: Uint8Array | string; compress?: boolean }>) {
   const zip = new ZipFile();
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -236,12 +271,7 @@ export async function buildEpubFromPaddleResult(
 ): Promise<EpubBuildResult> {
   const result = docParsingResultSchema.parse(rawResult);
   const warnings: string[] = [];
-  const metadata: EpubMetadata = {
-    title: sanitizeMetadataText(metadataInput.title, "Untitled document"),
-    author: sanitizeMetadataText(metadataInput.author),
-    language: metadataInput.language ?? "en",
-    originalFilename: sanitizeMetadataText(metadataInput.originalFilename, "document.pdf")
-  };
+  const metadata = sanitizeEpubMetadata(metadataInput);
   const resources = new ResourceRegistry();
   const imageMap = await prepareImageResources(collectImageReferences(result), resources, warnings);
   const chapters = splitChapters(result.pages.map((page) => page.markdownText));
