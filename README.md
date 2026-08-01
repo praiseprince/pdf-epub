@@ -4,8 +4,8 @@ A private local web app for converting PDFs into EPUB files. The app runs on
 your machine with FastAPI, stores jobs in SQLite, keeps files under `data/`, and
 uses Baidu PaddleOCR only for hosted document parsing.
 
-The previous Vercel/Blob implementation remains in git history and in the
-legacy Next.js source tree, but the supported path in this branch is local-first.
+The previous Vercel/Blob implementation is preserved on the
+`legacy-vercel-nextjs` branch. The supported app on `main` is local-first.
 
 ## What It Does
 
@@ -189,8 +189,9 @@ rendering for readability.
 
 ## Limits
 
-The local app does not inherit Vercel request, response, function, or Blob
-timeouts. Defaults are aligned to PaddleOCR async document parsing constraints:
+The local app does not inherit hosted request, response, function, or object
+storage timeouts. Defaults are aligned to PaddleOCR async document parsing
+constraints:
 
 - `MAX_PDF_SIZE_MB=200`
 - `MAX_PDF_PAGES=1000`
@@ -211,16 +212,18 @@ OCR timeout controls:
 
 ## Test Set
 
-The manifest includes small research papers, HTML-to-PDF articles, scanned-like
-fixtures, and a real large math-heavy book:
+The manifest lists small research papers, HTML-to-PDF article candidates,
+scanned-like fixture ideas, and a real large math-heavy book:
 
 - Mathematics for Machine Learning official PDF:
   https://mml-book.github.io/book/mml-book.pdf
 
-Download fixtures:
+The repository does not commit downloaded PDFs. Put real test PDFs under
+`testsets/pdfs/` or point the smoke script at any local PDF:
 
 ```sh
-npm run prepare-testset
+mkdir -p testsets/pdfs
+curl -L https://arxiv.org/pdf/1706.03762 -o testsets/pdfs/attention-all-you-need.pdf
 ```
 
 Large local smoke test without spending Baidu quota:
@@ -251,9 +254,8 @@ python scripts/smoke-local.py \
 ```sh
 . .venv/bin/activate
 pytest
-npm run lint
-npm run typecheck
-npm test
+npm run node:check
+node local_app/node/math_render.mjs < tests/fixtures/math-render-smoke.json
 ```
 
 Do not commit `.env`, `data/`, downloaded PDFs, generated EPUBs, or temp files.

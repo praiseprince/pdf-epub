@@ -17,19 +17,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "21"
       - run: npm ci
       - run: python -m pip install -r requirements.txt
       - run: pytest
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: mkdir -p tmp
-      - run: npm run sample-epub -- tmp/sample.epub
-      - run: curl -L -o tmp/epubcheck.zip https://github.com/w3c/epubcheck/releases/download/v5.3.0/epubcheck-5.3.0.zip
-      - run: unzip -q tmp/epubcheck.zip -d tmp
-      - run: EPUBCHECK_JAR=$PWD/tmp/epubcheck-5.3.0/epubcheck.jar npm run epubcheck -- tmp/sample.epub
-      - run: npm run build
+      - run: npm run node:check
+      - run: node local_app/node/math_render.mjs < tests/fixtures/math-render-smoke.json

@@ -1,0 +1,11 @@
+{
+  "outputDir": "tmp/math-ci",
+  "formulas": [
+    {
+      "key": "ci",
+      "latex": "\\mathbf{h}_{t+1}=\\mathbf{h}_{t}+f(\\mathbf{h}_{t},\\boldsymbol{\\theta}_{t}) \\tag*{(1)}",
+      "display": true,
+      "filename": "ci.png"
+    }
+  ]
+}
