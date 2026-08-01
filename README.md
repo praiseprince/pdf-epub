@@ -14,7 +14,11 @@ legacy Next.js source tree, but the supported path in this branch is local-first
   running jobs again
 - Background worker continues conversions outside the browser request
 - Local file storage for uploads, raw OCR JSON, page images, EPUBs, and logs
-- Baidu PaddleOCR-VL-1.6 document parsing through the official TypeScript SDK
+- Baidu document parsing through the official TypeScript SDK, with selectable
+  `PaddleOCR-VL-1.6`, `PaddleOCR-VL-1.5`, `PaddleOCR-VL`, and `PP-StructureV3`
+  models
+- Automatic OCR retry path: full-PDF submit first, then rendered page-by-page
+  OCR if Baidu does not accept the PDF upload promptly
 - EPUB builder that preserves OCR Markdown, sanitized raw HTML tables/figures,
   Paddle image assets, and rendered PNG formula images
 - The first PDF page is used as the EPUB cover image; full PDF-page chapters are
@@ -61,6 +65,10 @@ Create `.env` from `.env.example`, then fill in:
 APP_PIN_HASH=
 SESSION_SECRET=
 PADDLEOCR_ACCESS_TOKEN=
+LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
+LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=120
+LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS=120
+LOCAL_PADDLE_PAGE_SUBMIT_RETRIES=2
 ```
 
 Run the app:
@@ -95,6 +103,12 @@ starts, so the Saved jobs table shows queued and running work after a page
 reload. If the FastAPI server itself restarts, queued/running jobs are recovered
 and put back on the local worker queue.
 
+During Baidu submission, progress can only include a remote `paddle_job_id`
+after Baidu accepts the upload. To avoid jobs looking frozen at `0/N`, the app
+now shows the specific stage: full-PDF submit, rendered-page submit, or remote
+page OCR. In Auto retry mode, a full-PDF submit timeout switches to rendered
+page-by-page OCR before falling back to visual page images.
+
 Job files live here:
 
 ```text
@@ -109,6 +123,17 @@ data/
 ```
 
 Use Delete in the app to remove a job and its local files.
+
+## Parser Controls
+
+The upload form has two parser controls:
+
+- `Baidu model`: use `PaddleOCR-VL-1.6` by default. Try `PaddleOCR-VL-1.5`,
+  `PaddleOCR-VL`, or `PP-StructureV3` when a document mostly converts well but a
+  specific equation/table/figure is wrong.
+- `OCR path`: keep `Auto retry` for normal use. `Full PDF only` is useful when
+  you want to test Baidu's direct PDF parser. `Rendered pages` skips full-PDF
+  upload and sends locally rendered page images one by one.
 
 ## Math And Kobo
 
@@ -139,6 +164,14 @@ timeouts. Defaults are aligned to PaddleOCR async document parsing constraints:
 For a 100-page PDF, conversion time depends mostly on Baidu queue time and local
 page-image rendering. The browser can be closed while the local worker keeps
 running.
+
+OCR timeout controls:
+
+- `LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS`: how long to wait for Baidu to accept a
+  full-PDF upload before Auto retry switches to rendered pages.
+- `LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS`: how long each rendered page upload
+  can take.
+- `LOCAL_PADDLE_PAGE_SUBMIT_RETRIES`: rendered-page upload attempts per page.
 
 ## Test Set
 

@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from .parser_options import DEFAULT_PARSER_MODEL, DEFAULT_PARSER_STRATEGY
+
 
 def utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -25,6 +27,8 @@ class JobRecord:
     pages: int | None
     size_bytes: int
     paddle_job_id: str | None
+    parser_model: str
+    parser_strategy: str
     include_snapshots: bool
     create_kepub: bool
     source_path: str
@@ -51,6 +55,8 @@ class JobRecord:
             "pages": self.pages,
             "size_bytes": self.size_bytes,
             "paddle_job_id": self.paddle_job_id,
+            "parser_model": self.parser_model,
+            "parser_strategy": self.parser_strategy,
             "include_snapshots": self.include_snapshots,
             "has_epub": bool(self.epub_path),
             "create_kepub": self.create_kepub,
@@ -94,6 +100,8 @@ class JobStore:
                   pages INTEGER,
                   size_bytes INTEGER NOT NULL DEFAULT 0,
                   paddle_job_id TEXT,
+                  parser_model TEXT NOT NULL DEFAULT 'PaddleOCR-VL-1.6',
+                  parser_strategy TEXT NOT NULL DEFAULT 'auto',
                   include_snapshots INTEGER NOT NULL DEFAULT 1,
                   create_kepub INTEGER NOT NULL DEFAULT 0,
                   source_path TEXT NOT NULL,
@@ -109,6 +117,18 @@ class JobStore:
                 """
             )
             _ensure_column(conn, "jobs", "create_kepub", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(
+                conn,
+                "jobs",
+                "parser_model",
+                f"TEXT NOT NULL DEFAULT '{DEFAULT_PARSER_MODEL}'",
+            )
+            _ensure_column(
+                conn,
+                "jobs",
+                "parser_strategy",
+                f"TEXT NOT NULL DEFAULT '{DEFAULT_PARSER_STRATEGY}'",
+            )
 
     def create_job(
         self,
@@ -121,6 +141,8 @@ class JobStore:
         include_snapshots: bool,
         create_kepub: bool,
         source_path: Path,
+        parser_model: str = DEFAULT_PARSER_MODEL,
+        parser_strategy: str = DEFAULT_PARSER_STRATEGY,
     ) -> JobRecord:
         now = utc_now()
         with self.connect() as conn:
@@ -128,10 +150,11 @@ class JobStore:
                 """
                 INSERT INTO jobs (
                   id, source_filename, title, author, status, stage, message,
-                  size_bytes, include_snapshots, create_kepub, source_path, created_at, updated_at
+                  size_bytes, include_snapshots, create_kepub, parser_model, parser_strategy,
+                  source_path, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, 'queued', 'Queued', 'Waiting for the local worker.',
-                        ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -141,6 +164,8 @@ class JobStore:
                     size_bytes,
                     1 if include_snapshots else 0,
                     1 if create_kepub else 0,
+                    parser_model,
+                    parser_strategy,
                     str(source_path),
                     now,
                     now,
@@ -243,6 +268,8 @@ def _row_to_job(row: sqlite3.Row) -> JobRecord:
         pages=row["pages"],
         size_bytes=row["size_bytes"],
         paddle_job_id=row["paddle_job_id"],
+        parser_model=row["parser_model"],
+        parser_strategy=row["parser_strategy"],
         include_snapshots=bool(row["include_snapshots"]),
         create_kepub=bool(row["create_kepub"]),
         source_path=row["source_path"],

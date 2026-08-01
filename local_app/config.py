@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .parser_options import DEFAULT_PARSER_MODEL, ParserModel
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -24,6 +26,7 @@ class Settings(BaseSettings):
     local_host: str = Field("127.0.0.1", alias="LOCAL_HOST")
     local_port: int = Field(8000, alias="LOCAL_PORT")
     local_paddle_mode: Literal["live", "fixture"] = Field("live", alias="LOCAL_PADDLE_MODE")
+    paddle_model: ParserModel = Field(DEFAULT_PARSER_MODEL, alias="LOCAL_PADDLE_MODEL")
 
     max_pdf_size_mb: int = Field(200, alias="MAX_PDF_SIZE_MB")
     max_pdf_pages: int = Field(1000, alias="MAX_PDF_PAGES")
@@ -34,6 +37,9 @@ class Settings(BaseSettings):
     create_kepub_default: bool = Field(False, alias="LOCAL_CREATE_KEPUB_DEFAULT")
     snapshot_dpi: int = Field(120, alias="LOCAL_SNAPSHOT_DPI")
     paddle_poll_seconds: float = Field(5.0, alias="LOCAL_PADDLE_POLL_SECONDS")
+    paddle_submit_timeout_seconds: int = Field(120, alias="LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS")
+    paddle_page_submit_timeout_seconds: int = Field(120, alias="LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS")
+    paddle_page_submit_retries: int = Field(2, alias="LOCAL_PADDLE_PAGE_SUBMIT_RETRIES")
     worker_poll_seconds: float = Field(1.0, alias="LOCAL_WORKER_POLL_SECONDS")
 
     epubcheck_jar: Path | None = Field(None, alias="EPUBCHECK_JAR")

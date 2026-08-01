@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import Settings, get_settings
 from .database import JobStore, serialize_jobs
+from .parser_options import PARSER_MODELS, PARSER_STRATEGIES, normalize_parser_model, normalize_parser_strategy
 from .paths import ensure_data_dirs, job_upload_dir
 from .security import clear_session_cookie, read_session, require_api_session, set_session_cookie, verify_pin
 from .worker import JobWorker, delete_job_files
@@ -111,6 +112,9 @@ async def convert_page(request: Request, settings: Settings = Depends(settings_d
             "max_pdf_size_mb": settings.max_pdf_size_mb,
             "max_pdf_pages": settings.max_pdf_pages,
             "paddle_mode": settings.local_paddle_mode,
+            "parser_models": PARSER_MODELS,
+            "parser_strategies": PARSER_STRATEGIES,
+            "default_parser_model": settings.paddle_model,
             "create_kepub_default": settings.create_kepub_default,
         },
     )
@@ -142,6 +146,8 @@ async def create_job(
     title: str = Form(""),
     author: str = Form(""),
     create_kepub: bool = Form(False),
+    parser_model: str = Form(""),
+    parser_strategy: str = Form("auto"),
     _: None = Depends(api_auth),
     settings: Settings = Depends(settings_dep),
     store: JobStore = Depends(store_dep),
@@ -172,6 +178,8 @@ async def create_job(
         size_bytes=size,
         include_snapshots=True,
         create_kepub=create_kepub,
+        parser_model=normalize_parser_model(parser_model or settings.paddle_model),
+        parser_strategy=normalize_parser_strategy(parser_strategy),
         source_path=source_path,
     )
     await worker.enqueue(job.id)

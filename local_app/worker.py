@@ -9,6 +9,7 @@ from .assets import add_page_snapshots, collect_paddle_assets, merge_bundles
 from .config import Settings
 from .database import JobRecord, JobStore, utc_now
 from .epub_builder import build_epub, write_raw_result
+from .parser_options import ParserModel, normalize_parser_model, normalize_parser_strategy
 from .paths import job_dirs, job_epub_dir, job_ocr_dir, job_pages_dir
 from .paddle_client import PaddleClient, PaddleClientError
 from .pdf_tools import PdfToolError, pdfinfo, render_pdf_pages
@@ -76,13 +77,17 @@ class JobWorker:
             progress_total=0,
         )
 
-        snapshot_paths: list[Path] = []
+        cover_snapshot_paths: list[Path] = []
+        fallback_snapshot_paths: list[Path] = []
         raw_result: dict[str, Any] | None = None
         raw_result_path: Path | None = None
         parse_error: str | None = None
+        ocr_notes: list[str] = []
 
         try:
             source_path = Path(job.source_path)
+            parser_model = normalize_parser_model(job.parser_model)
+            parser_strategy = normalize_parser_strategy(job.parser_strategy)
             self._check_cancel(job_id)
             info = pdfinfo(source_path)
             pages = int(info.get("pages", 0) or 0)
@@ -109,17 +114,10 @@ class JobWorker:
                     first_page=1,
                     last_page=1,
                 )
-                self.store.update_job(job_id, progress_done=len(snapshot_paths))
+                cover_snapshot_paths = snapshot_paths
+                self.store.update_job(job_id, progress_done=len(cover_snapshot_paths))
 
             self._check_cancel(job_id)
-            self.store.update_job(
-                job_id,
-                stage="Sending to document parser",
-                message="Submitting the local PDF file to Baidu PaddleOCR.",
-                progress_done=0,
-                progress_total=pages,
-            )
-
             client = PaddleClient(self.settings)
 
             def on_paddle_status(status: dict[str, Any]) -> None:
@@ -138,30 +136,34 @@ class JobWorker:
                 self.store.update_job(job_id, **update)
 
             try:
-                raw_result = client.parse_document(
+                raw_result = self._parse_with_baidu(
+                    job,
                     source_path,
-                    on_status=on_paddle_status,
-                    should_cancel=lambda: self._cancel_requested(job_id),
-                    page_count=pages,
+                    pages=pages,
+                    parser_model=parser_model,
+                    parser_strategy=parser_strategy,
+                    client=client,
+                    on_full_status=on_paddle_status,
+                    ocr_notes=ocr_notes,
                 )
                 raw_result_path = job_ocr_dir(self.settings, job_id) / "raw-result.json"
                 write_raw_result(raw_result_path, raw_result)
                 self.store.update_job(job_id, raw_result_path=raw_result_path)
             except PaddleClientError as exc:
                 parse_error = str(exc)
-                if job.include_snapshots and self.settings.include_page_snapshots and len(snapshot_paths) < pages:
+                if job.include_snapshots and self.settings.include_page_snapshots:
                     self.store.update_job(
                         job_id,
                         stage="Rendering fallback pages",
-                        message="OCR failed. Rendering every PDF page for a visual fallback EPUB.",
+                        message="OCR failed after retries. Rendering every page for a visual fallback EPUB.",
                         progress_done=0,
                         progress_total=pages,
                     )
                     pages_dir = job_pages_dir(self.settings, job_id)
                     shutil.rmtree(pages_dir, ignore_errors=True)
-                    snapshot_paths = render_pdf_pages(source_path, pages_dir, dpi=self.settings.snapshot_dpi)
-                    self.store.update_job(job_id, progress_done=len(snapshot_paths))
-                if not snapshot_paths:
+                    fallback_snapshot_paths = render_pdf_pages(source_path, pages_dir, dpi=self.settings.snapshot_dpi)
+                    self.store.update_job(job_id, progress_done=len(fallback_snapshot_paths))
+                if not fallback_snapshot_paths:
                     raise RuntimeError(parse_error) from exc
 
             self._check_cancel(job_id)
@@ -177,8 +179,10 @@ class JobWorker:
                 max_image_bytes=self.settings.max_image_size_bytes,
                 max_total_bytes=self.settings.max_total_asset_bytes,
             )
-            page_bundle = add_page_snapshots(snapshot_paths)
+            build_snapshot_paths = fallback_snapshot_paths if parse_error else cover_snapshot_paths
+            page_bundle = add_page_snapshots(build_snapshot_paths)
             bundle = merge_bundles(ocr_bundle, page_bundle)
+            bundle.warnings.extend(ocr_notes)
             if parse_error:
                 bundle.warnings.append(f"PaddleOCR failed: {parse_error}")
 
@@ -190,7 +194,7 @@ class JobWorker:
                 original_filename=job.source_filename,
                 raw_result=raw_result,
                 bundle=bundle,
-                snapshot_paths=snapshot_paths,
+                snapshot_paths=build_snapshot_paths,
                 snapshot_source_dir=job_pages_dir(self.settings, job_id),
                 assets_source_dir=ocr_assets_dir,
             )
@@ -201,6 +205,8 @@ class JobWorker:
             final_message = "EPUB is ready."
             if parse_error:
                 final_message = "EPUB is ready using visual fallback pages because OCR failed."
+            elif ocr_notes:
+                final_message = f"EPUB is ready with {len(ocr_notes)} Baidu retry note(s)."
             elif build_result.warnings:
                 final_message = f"EPUB is ready with {len(build_result.warnings)} conversion note(s)."
 
@@ -242,6 +248,117 @@ class JobWorker:
     def _check_cancel(self, job_id: str) -> None:
         if self._cancel_requested(job_id):
             raise JobCanceled()
+
+    def _parse_with_baidu(
+        self,
+        job: JobRecord,
+        source_path: Path,
+        *,
+        pages: int,
+        parser_model: ParserModel,
+        parser_strategy: str,
+        client: PaddleClient,
+        on_full_status: Any,
+        ocr_notes: list[str],
+    ) -> dict[str, Any]:
+        if parser_strategy in {"auto", "full_document"}:
+            self.store.update_job(
+                job.id,
+                stage="Submitting document",
+                message=(
+                    "Uploading the full PDF to Baidu PaddleOCR. "
+                    f"If Baidu does not accept it within {self.settings.paddle_submit_timeout_seconds}s, "
+                    "the worker can switch to page OCR."
+                ),
+                progress_done=0,
+                progress_total=pages,
+            )
+            try:
+                return client.parse_document(
+                    source_path,
+                    model=parser_model,
+                    on_status=on_full_status,
+                    should_cancel=lambda: self._cancel_requested(job.id),
+                    page_count=pages,
+                    submit_timeout_seconds=self.settings.paddle_submit_timeout_seconds,
+                )
+            except PaddleClientError as exc:
+                if parser_strategy == "full_document" or exc.is_auth_error:
+                    raise
+                note = f"Full PDF submit failed, so OCR used rendered pages instead: {exc}"
+                ocr_notes.append(note)
+
+        return self._parse_rendered_pages(job, source_path, pages=pages, parser_model=parser_model, client=client)
+
+    def _parse_rendered_pages(
+        self,
+        job: JobRecord,
+        source_path: Path,
+        *,
+        pages: int,
+        parser_model: ParserModel,
+        client: PaddleClient,
+    ) -> dict[str, Any]:
+        self._check_cancel(job.id)
+        self.store.update_job(
+            job.id,
+            stage="Rendering OCR pages",
+            message="Rendering pages locally for page-by-page Baidu OCR.",
+            progress_done=0,
+            progress_total=pages,
+        )
+        rendered_dir = job_ocr_dir(self.settings, job.id) / "rendered-pages"
+        shutil.rmtree(rendered_dir, ignore_errors=True)
+        page_paths = render_pdf_pages(source_path, rendered_dir, dpi=self.settings.snapshot_dpi)
+        if len(page_paths) != pages:
+            raise PaddleClientError(f"Rendered {len(page_paths)} page image(s), expected {pages}.")
+
+        def on_page_start(page: int, total: int, attempt: int) -> None:
+            suffix = f" attempt {attempt}" if attempt > 1 else ""
+            self.store.update_job(
+                job.id,
+                stage="Submitting page OCR",
+                message=f"Uploading rendered page {page} of {total} to Baidu{suffix}.",
+                progress_done=page - 1,
+                progress_total=total,
+            )
+
+        def on_page_status(page: int, attempt: int, status: dict[str, Any]) -> None:
+            update: dict[str, Any] = {
+                "stage": "Reading page OCR",
+                "message": f"Baidu is reading page {page} of {pages}.",
+                "progress_done": page - 1,
+                "progress_total": pages,
+            }
+            if status.get("paddle_job_id"):
+                update["paddle_job_id"] = status["paddle_job_id"]
+            if status.get("jobId"):
+                update["paddle_job_id"] = status["jobId"]
+            progress = status.get("progress")
+            if isinstance(progress, dict):
+                page_done = int(progress.get("extractedPages") or 0)
+                update["progress_done"] = min(pages, page - 1 + page_done)
+            elif status.get("message"):
+                update["message"] = f"Page {page} of {pages}: {status['message']}"
+            if attempt > 1:
+                update["message"] = f"{update['message']} Retry {attempt}."
+            self.store.update_job(job.id, **update)
+
+        result = client.parse_page_images(
+            page_paths,
+            model=parser_model,
+            on_page_start=on_page_start,
+            on_status=on_page_status,
+            should_cancel=lambda: self._cancel_requested(job.id),
+        )
+        self.store.update_job(
+            job.id,
+            stage="Reading page OCR",
+            message="Baidu page OCR finished.",
+            progress_done=pages,
+            progress_total=pages,
+        )
+        return result
 
 
 def delete_job_files(settings: Settings, job_id: str) -> None:

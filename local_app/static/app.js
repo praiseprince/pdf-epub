@@ -83,7 +83,8 @@ function renderJobs(jobs) {
     `;
 
     row.querySelector(".job-title").textContent = job.title || job.source_filename;
-    row.querySelector(".job-meta").textContent = `${job.source_filename} · ${formatBytes(job.size_bytes)}`;
+    const parserMeta = [job.parser_model, strategyLabel(job.parser_strategy)].filter(Boolean).join(" · ");
+    row.querySelector(".job-meta").textContent = `${job.source_filename} · ${formatBytes(job.size_bytes)}${parserMeta ? ` · ${parserMeta}` : ""}`;
     row.querySelector(".status-pill").textContent = job.status;
     row.querySelector(".job-message").textContent = `${job.stage}${job.message ? ` · ${job.message}` : ""}`;
     row.querySelector(".progress").textContent = progressText(job);
@@ -119,6 +120,13 @@ function actionButton(label, className, handler) {
   if (className) button.className = className;
   button.addEventListener("click", handler);
   return button;
+}
+
+function strategyLabel(strategy) {
+  if (strategy === "full_document") return "Full PDF";
+  if (strategy === "rendered_pages") return "Rendered pages";
+  if (strategy === "auto") return "Auto retry";
+  return strategy || "";
 }
 
 async function postAction(jobId, action) {

@@ -35,6 +35,24 @@
               <input id="author" name="author" type="text" maxlength="200">
             </label>
           </div>
+          <div class="metadata-grid parser-grid">
+            <label>
+              Baidu model
+              <select id="parser-model" name="parser_model">
+                {% for model in parser_models %}
+                  <option value="{{ model }}" {% if model == default_parser_model %}selected{% endif %}>{{ model }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              OCR path
+              <select id="parser-strategy" name="parser_strategy">
+                <option value="auto" selected>Auto retry</option>
+                <option value="full_document">Full PDF only</option>
+                <option value="rendered_pages">Rendered pages</option>
+              </select>
+            </label>
+          </div>
           <label class="check-row">
             <input name="create_kepub" type="checkbox" value="true" {% if create_kepub_default %}checked{% endif %}>
             Create Kobo .kepub.epub copy

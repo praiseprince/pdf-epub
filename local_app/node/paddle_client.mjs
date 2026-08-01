@@ -3,7 +3,7 @@ import { Model, PaddleOCRClient } from "@paddleocr/api-sdk";
 
 const command = process.argv[2];
 
-const DEFAULT_OPTIONS = {
+const DEFAULT_VL_OPTIONS = {
   useDocOrientationClassify: true,
   useDocUnwarping: true,
   useLayoutDetection: true,
@@ -15,6 +15,40 @@ const DEFAULT_OPTIONS = {
   mergeTables: true,
   relevelTitles: true,
 };
+
+const DEFAULT_STRUCTURE_OPTIONS = {
+  useDocOrientationClassify: true,
+  useDocUnwarping: true,
+  useTextlineOrientation: true,
+  useTableRecognition: true,
+  useFormulaRecognition: true,
+  useChartRecognition: true,
+  useRegionDetection: true,
+  formatBlockContent: true,
+  prettifyMarkdown: true,
+  returnMarkdownImages: true,
+  showFormulaNumber: true,
+};
+
+function intEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name] || "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function defaultOptions(model) {
+  return model === Model.PPStructureV3 ? DEFAULT_STRUCTURE_OPTIONS : DEFAULT_VL_OPTIONS;
+}
+
+function requestFromPayload(payload) {
+  const model = payload.model || process.env.PADDLEOCR_MODEL || Model.PaddleOCRVL16;
+  return {
+    model,
+    options: payload.options || defaultOptions(model),
+    pageRanges: payload.pageRanges,
+    batchId: payload.batchId,
+    ...(payload.fileUrl ? { fileUrl: payload.fileUrl } : { filePath: payload.filePath }),
+  };
+}
 
 async function readJsonStdin() {
   const chunks = [];
@@ -28,8 +62,8 @@ async function readJsonStdin() {
 function client() {
   return new PaddleOCRClient({
     token: process.env.PADDLEOCR_ACCESS_TOKEN,
-    requestTimeout: 300_000,
-    pollTimeout: 3_600_000,
+    requestTimeout: intEnv("PADDLEOCR_REQUEST_TIMEOUT_MS", 300_000),
+    pollTimeout: intEnv("PADDLEOCR_POLL_TIMEOUT_MS", 3_600_000),
   });
 }
 
@@ -38,11 +72,7 @@ async function main() {
   const paddle = client();
 
   if (command === "submit") {
-    const result = await paddle.submitDocumentParsing({
-      filePath: payload.filePath,
-      model: Model.PaddleOCRVL16,
-      options: DEFAULT_OPTIONS,
-    });
+    const result = await paddle.submitDocumentParsing(requestFromPayload(payload));
     console.log(JSON.stringify(result));
     return;
   }
@@ -54,17 +84,20 @@ async function main() {
   }
 
   if (command === "result") {
-    const result = await paddle.waitDocumentParsingResult(payload.jobId);
+    const model = payload.model || process.env.PADDLEOCR_MODEL || Model.PaddleOCRVL16;
+    const result = await paddle.waitDocumentParsingResult({
+      jobId: payload.jobId,
+      model,
+      task: "document_parsing",
+      pageRanges: payload.pageRanges,
+      batchId: payload.batchId,
+    });
     console.log(JSON.stringify(result));
     return;
   }
 
   if (command === "parse") {
-    const result = await paddle.parseDocument({
-      filePath: payload.filePath,
-      model: Model.PaddleOCRVL16,
-      options: DEFAULT_OPTIONS,
-    });
+    const result = await paddle.parseDocument(requestFromPayload(payload));
     console.log(JSON.stringify(result));
     return;
   }
@@ -79,6 +112,13 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(
+    JSON.stringify({
+      name: error?.name || "Error",
+      message: error instanceof Error ? error.message : String(error),
+      timeoutMs: error?.timeoutMs,
+      statusCode: error?.statusCode,
+    })
+  );
   process.exitCode = 1;
 });
