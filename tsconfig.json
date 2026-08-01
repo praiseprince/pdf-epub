@@ -38,6 +38,14 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".vercel",
+    "tmp",
+    "coverage",
+    "dist",
+    "testsets/pdfs",
+    "testsets/screenshots",
+    "testsets/epubs",
+    "testsets/reports"
   ]
 }

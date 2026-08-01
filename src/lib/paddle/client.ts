@@ -50,12 +50,28 @@ async function withPaddleRetries<T>(operation: () => Promise<T>, attempts = 3): 
   throw lastError;
 }
 
-export async function submitPaddleDocument(fileUrl: string): Promise<Job> {
+function submitOptions() {
+  return {
+    model: Model.PaddleOCRVL16,
+    options: DEFAULT_OPTIONS
+  };
+}
+
+export async function submitPaddleDocumentUrl(fileUrl: string): Promise<Job> {
   return withPaddleRetries(() =>
     client(90_000, 90_000).submitDocumentParsing({
       fileUrl,
-      model: Model.PaddleOCRVL16,
-      options: DEFAULT_OPTIONS
+      ...submitOptions()
+    }),
+    2
+  );
+}
+
+export async function submitPaddleDocumentFile(filePath: string): Promise<Job> {
+  return withPaddleRetries(() =>
+    client(90_000, 90_000).submitDocumentParsing({
+      filePath,
+      ...submitOptions()
     }),
     2
   );

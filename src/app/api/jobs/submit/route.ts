@@ -1,3 +1,6 @@
+import { unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertPathBelongsToJob } from "@/lib/blob/paths";
@@ -7,7 +10,7 @@ import { maxPdfSizeBytes } from "@/lib/config/limits";
 import { sanitizeMetadataText } from "@/lib/files/sanitize";
 import { jsonError, requireSession } from "@/lib/http/api";
 import { verifyUploadToken, signJobToken } from "@/lib/jobs/tokens";
-import { submitPaddleDocument, mapPaddleError } from "@/lib/paddle/client";
+import { submitPaddleDocumentFile, submitPaddleDocumentUrl, mapPaddleError } from "@/lib/paddle/client";
 import { inspectPdfBytes } from "@/lib/pdf/inspect";
 
 export const runtime = "nodejs";
@@ -55,7 +58,17 @@ export async function POST(request: Request) {
   let paddleJob;
   try {
     const signedPdfUrl = await createSignedGetUrl(parsed.data.inputPath);
-    paddleJob = await submitPaddleDocument(signedPdfUrl);
+    try {
+      paddleJob = await submitPaddleDocumentUrl(signedPdfUrl);
+    } catch {
+      const tmpPdfPath = join(tmpdir(), `${uploadClaims.jobId}.pdf`);
+      await writeFile(tmpPdfPath, pdfBytes);
+      try {
+        paddleJob = await submitPaddleDocumentFile(tmpPdfPath);
+      } finally {
+        await unlink(tmpPdfPath).catch(() => undefined);
+      }
+    }
   } catch (error) {
     const publicError = mapPaddleError(error);
     return NextResponse.json({ error: publicError.message }, { status: publicError.status });
