@@ -52,7 +52,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
 npm install
-python scripts/generate-local-secrets.py "your-long-personal-pin"
+python scripts/generate-local-secrets.py "1234"
 ```
 
 Create `.env` from `.env.example`, then fill in:
@@ -78,11 +78,15 @@ Generate a new hash:
 
 ```sh
 . .venv/bin/activate
-python scripts/generate-local-secrets.py "your-new-long-pin"
+python scripts/generate-local-secrets.py "4321"
 ```
 
 Update `APP_PIN_HASH` in `.env`, restart the FastAPI server, and sign in with
 the new PIN.
+
+The local generator allows short PINs because this app is meant for private use
+on your own machine. Keep `SESSION_SECRET` random and do not expose the server
+on a public network with a short PIN.
 
 ## Jobs And Reloads
 

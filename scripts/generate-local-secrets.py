@@ -6,14 +6,17 @@ import sys
 import bcrypt
 
 
+MIN_LOCAL_PIN_LENGTH = 4
+
+
 def main() -> int:
     if len(sys.argv) != 2:
-        print("Usage: python scripts/generate-local-secrets.py <your-pin-or-passcode>", file=sys.stderr)
+        print("Usage: python scripts/generate-local-secrets.py <your-local-pin>", file=sys.stderr)
         return 1
 
     pin = sys.argv[1]
-    if len(pin) < 8:
-        print("Use at least eight characters for the local app PIN.", file=sys.stderr)
+    if len(pin) < MIN_LOCAL_PIN_LENGTH:
+        print(f"Use at least {MIN_LOCAL_PIN_LENGTH} characters for the local app PIN.", file=sys.stderr)
         return 1
 
     pin_hash = bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
