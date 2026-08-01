@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF to EPUB</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local converter</p>
+        <h1>PDF to EPUB</h1>
+      </div>
+      <form method="post" action="/logout">
+        <button class="secondary" type="submit">Lock</button>
+      </form>
+    </header>
+
+    <main class="workspace">
+      <section class="upload-panel">
+        <form id="upload-form">
+          <label class="drop-zone" for="pdf-file" id="drop-zone">
+            <input id="pdf-file" name="file" type="file" accept="application/pdf,.pdf" required>
+            <span class="drop-title">Choose PDF</span>
+            <span id="selected-file" class="drop-meta">Drop a file here or select one.</span>
+          </label>
+          <div class="metadata-grid">
+            <label>
+              Title
+              <input id="title" name="title" type="text" maxlength="200">
+            </label>
+            <label>
+              Author
+              <input id="author" name="author" type="text" maxlength="200">
+            </label>
+          </div>
+          <div class="form-row">
+            <button type="submit">Convert to EPUB</button>
+            <span class="limits">{{ max_pdf_size_mb }} MB / {{ max_pdf_pages }} pages · {{ paddle_mode }} parser</span>
+          </div>
+          <p id="upload-error" class="error" hidden></p>
+        </form>
+      </section>
+
+      <section class="jobs-panel">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Saved jobs</p>
+            <h2>Current and recent work</h2>
+          </div>
+          <button class="secondary" id="refresh-jobs" type="button">Refresh</button>
+        </div>
+        <div id="jobs-empty" class="empty">No jobs yet.</div>
+        <div class="table-wrap">
+          <table id="jobs-table" hidden>
+            <thead>
+              <tr>
+                <th>Document</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

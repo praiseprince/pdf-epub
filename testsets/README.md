@@ -18,6 +18,7 @@ The corpus intentionally covers:
 - chart-heavy papers
 - online HTML articles printed to PDF
 - image-only scanned-like PDFs
+- a large real-world 400+ page math-heavy book for timeout and storage testing
 
 The source documents are fetched from public URLs for local testing. Review the
 source terms before redistributing downloaded files. Do not commit private PDFs,

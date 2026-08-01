@@ -16,7 +16,11 @@
     "prepare-testset": "tsx scripts/prepare-testset.ts",
     "delete-temp-blobs": "tsx scripts/delete-temp-blobs.ts",
     "generate-secrets": "tsx scripts/generate-secrets.ts",
-    "epubcheck": "tsx scripts/run-epubcheck.ts"
+    "epubcheck": "tsx scripts/run-epubcheck.ts",
+    "local:run": "uvicorn local_app.main:app --reload --host 127.0.0.1 --port 8000",
+    "local:secrets": "python3 scripts/generate-local-secrets.py",
+    "local:smoke": "python3 scripts/smoke-local.py",
+    "python:test": "pytest"
   },
   "dependencies": {
     "@paddleocr/api-sdk": "0.2.3",

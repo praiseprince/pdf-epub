@@ -3,6 +3,13 @@
   "outputDirectory": "testsets/pdfs",
   "items": [
     {
+      "id": "mathematics-for-machine-learning-book",
+      "type": "pdf",
+      "filename": "mathematics-for-machine-learning.pdf",
+      "url": "https://mml-book.github.io/book/mml-book.pdf",
+      "description": "Large real-world 400+ page math-heavy book with equations, tables, figures, references, and long-form structure."
+    },
+    {
       "id": "attention-all-you-need",
       "type": "pdf",
       "filename": "attention-all-you-need.pdf",

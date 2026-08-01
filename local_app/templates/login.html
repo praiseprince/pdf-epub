@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF to EPUB</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-panel">
+        <p class="eyebrow">Local converter</p>
+        <h1>PDF to EPUB</h1>
+        {% if missing_config %}
+          <p class="notice">Set APP_PIN_HASH and SESSION_SECRET before signing in.</p>
+        {% endif %}
+        {% if error %}
+          <p class="error">{{ error }}</p>
+        {% endif %}
+        <form method="post" action="/login" class="pin-form">
+          <label for="pin">PIN</label>
+          <input id="pin" name="pin" type="password" autocomplete="current-password" autofocus required>
+          <button type="submit">Unlock</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

@@ -5,9 +5,15 @@
 .next/
 .vercel/
 node_modules/
+.venv/
+data/
+__pycache__/
+*.py[cod]
 coverage/
 dist/
 tmp/
+*.sqlite
+*.sqlite3
 *.tsbuildinfo
 *.epub
 *.pdf
