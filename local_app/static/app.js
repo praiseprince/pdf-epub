@@ -127,6 +127,7 @@ function actionButton(label, className, handler) {
 
 function strategyLabel(strategy) {
   if (strategy === "full_document") return "Full PDF";
+  if (strategy === "pdf_chunks") return "PDF chunks";
   if (strategy === "rendered_pages") return "Rendered pages";
   if (strategy === "auto") return "Auto retry";
   return strategy || "";

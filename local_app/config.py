@@ -44,8 +44,19 @@ class Settings(BaseSettings):
     include_page_snapshots: bool = Field(True, alias="LOCAL_INCLUDE_PAGE_SNAPSHOTS")
     create_kepub_default: bool = Field(False, alias="LOCAL_CREATE_KEPUB_DEFAULT")
     snapshot_dpi: int = Field(120, alias="LOCAL_SNAPSHOT_DPI")
+    figure_crop_dpi: int = Field(240, alias="LOCAL_FIGURE_CROP_DPI")
     paddle_poll_seconds: float = Field(5.0, alias="LOCAL_PADDLE_POLL_SECONDS")
-    paddle_submit_timeout_seconds: int = Field(500, alias="LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS")
+    paddle_submit_timeout_seconds: int = Field(180, alias="LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS")
+    paddle_auto_ocr_timeout_seconds: int = Field(300, alias="LOCAL_PADDLE_AUTO_OCR_TIMEOUT_SECONDS")
+    paddle_status_timeout_seconds: int = Field(30, alias="LOCAL_PADDLE_STATUS_TIMEOUT_SECONDS")
+    paddle_chunk_pages: int = Field(2, alias="LOCAL_PADDLE_CHUNK_PAGES")
+    paddle_chunk_target_mb: int = Field(1, alias="LOCAL_PADDLE_CHUNK_TARGET_MB")
+    paddle_chunk_concurrency: int = Field(12, alias="LOCAL_PADDLE_CHUNK_CONCURRENCY")
+    paddle_chunk_timeout_seconds: int = Field(180, alias="LOCAL_PADDLE_CHUNK_TIMEOUT_SECONDS")
+    paddle_chunk_retries: int = Field(1, alias="LOCAL_PADDLE_CHUNK_RETRIES")
+    paddle_chunk_retry_raster_dpi: int = Field(160, alias="LOCAL_PADDLE_CHUNK_RETRY_RASTER_DPI")
+    paddle_auto_chunk_min_pages: int = Field(20, alias="LOCAL_PADDLE_AUTO_CHUNK_MIN_PAGES")
+    paddle_auto_chunk_min_bytes_per_page: int = Field(350_000, alias="LOCAL_PADDLE_AUTO_CHUNK_MIN_BYTES_PER_PAGE")
     paddle_page_submit_timeout_seconds: int = Field(120, alias="LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS")
     paddle_page_submit_retries: int = Field(2, alias="LOCAL_PADDLE_PAGE_SUBMIT_RETRIES")
     worker_poll_seconds: float = Field(1.0, alias="LOCAL_WORKER_POLL_SECONDS")
@@ -84,6 +95,10 @@ class Settings(BaseSettings):
     @property
     def max_total_asset_bytes(self) -> int:
         return self.max_total_asset_mb * 1024 * 1024
+
+    @property
+    def paddle_chunk_target_bytes(self) -> int:
+        return self.paddle_chunk_target_mb * 1024 * 1024
 
 
 @lru_cache(maxsize=1)

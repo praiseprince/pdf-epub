@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from local_app.assets import add_page_snapshots, collect_paddle_assets, merge_bundles
-from local_app.epub_builder import _remove_page_header_from_crop, build_epub
+from local_app.epub_builder import _remove_page_header_from_crop, _trim_outer_whitespace, build_epub
 
 
 ONE_PIXEL_PNG = base64.b64encode(
@@ -549,6 +549,21 @@ def test_page_header_trim_does_not_remove_upper_panels_from_multirow_plot() -> N
     trimmed = _remove_page_header_from_crop(image)
 
     assert trimmed.size == image.size
+
+
+def test_epub_builder_trims_outer_whitespace_from_preserved_figure_crop() -> None:
+    image = Image.new("RGB", (240, 160), "white")
+    for x in range(70, 190):
+        for y in range(36, 112):
+            image.putpixel((x, y), (20, 80, 160))
+
+    trimmed = _trim_outer_whitespace(image)
+
+    assert trimmed.width < image.width
+    assert trimmed.height < image.height
+    assert trimmed.width >= 120
+    assert trimmed.height >= 76
+    assert trimmed.getpixel((trimmed.width // 2, trimmed.height // 2)) == (20, 80, 160)
 
 
 def test_epub_builder_crops_full_multirow_plot_cluster(tmp_path: Path) -> None:

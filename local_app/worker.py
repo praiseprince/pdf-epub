@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,7 @@ from .llm_repair import MathRepairClient
 from .parser_options import ParserModel, normalize_parser_model, normalize_parser_strategy
 from .paths import job_dirs, job_epub_dir, job_ocr_dir, job_pages_dir
 from .paddle_client import PaddleClient, PaddleClientError
-from .pdf_tools import PdfToolError, pdfinfo, render_pdf_pages
+from .pdf_tools import pdfinfo, render_pdf_pages, split_pdf_chunks
 
 
 class JobCanceled(RuntimeError):
@@ -215,7 +217,7 @@ class JobWorker:
 
             final_message = "EPUB is ready."
             if ocr_notes:
-                final_message = f"EPUB is ready with {len(ocr_notes)} Baidu retry note(s)."
+                final_message = f"EPUB is ready with {len(ocr_notes)} conversion note(s)."
             elif build_result.warnings:
                 final_message = f"EPUB is ready with {len(build_result.warnings)} conversion note(s)."
 
@@ -270,14 +272,53 @@ class JobWorker:
         on_full_status: Any,
         ocr_notes: list[str],
     ) -> dict[str, Any]:
+        auto_deadline = None
+        if parser_strategy == "auto":
+            auto_deadline = time.monotonic() + max(1, self.settings.paddle_auto_ocr_timeout_seconds)
+
+        def timeout_budget(default: int) -> int:
+            if auto_deadline is None:
+                return max(1, default)
+            remaining = int(auto_deadline - time.monotonic())
+            if remaining <= 0:
+                raise PaddleClientError(
+                    f"Auto OCR exceeded {self.settings.paddle_auto_ocr_timeout_seconds}s before Baidu finished.",
+                    error_name="PollingTimeoutError",
+                )
+            return max(1, min(default, remaining))
+
+        if parser_strategy == "pdf_chunks" or (
+            parser_strategy == "auto" and self._should_start_with_pdf_chunks(source_path, pages)
+        ):
+            if parser_strategy == "auto":
+                ocr_notes.append(
+                    "Auto OCR used PDF chunks immediately because the file looks image-heavy enough "
+                    "to make full-PDF submission unreliable."
+                )
+            return self._parse_pdf_chunks(
+                job,
+                source_path,
+                pages=pages,
+                parser_model=parser_model,
+                client=client,
+                submit_timeout_seconds=timeout_budget(self.settings.paddle_submit_timeout_seconds),
+                wait_timeout_seconds=timeout_budget(self.settings.paddle_chunk_timeout_seconds),
+                deadline_monotonic=auto_deadline,
+            )
+
         if parser_strategy in {"auto", "full_document"}:
+            submit_timeout = self.settings.paddle_submit_timeout_seconds
+            wait_timeout = self.settings.paddle_auto_ocr_timeout_seconds if parser_strategy == "auto" else None
+            if parser_strategy == "auto":
+                submit_timeout = timeout_budget(submit_timeout)
+                wait_timeout = timeout_budget(wait_timeout)
             self.store.update_job(
                 job.id,
                 stage="Submitting document",
                 message=(
                     "Uploading the full PDF to Baidu PaddleOCR. "
-                    f"If Baidu does not accept it within {self.settings.paddle_submit_timeout_seconds}s, "
-                    "the worker can switch to page OCR."
+                    f"If Baidu does not accept or finish it within {submit_timeout}s, "
+                    "the worker can switch to PDF chunks."
                 ),
                 progress_done=0,
                 progress_total=pages,
@@ -289,15 +330,143 @@ class JobWorker:
                     on_status=on_full_status,
                     should_cancel=lambda: self._cancel_requested(job.id),
                     page_count=pages,
-                    submit_timeout_seconds=self.settings.paddle_submit_timeout_seconds,
+                    submit_timeout_seconds=submit_timeout,
+                    wait_timeout_seconds=wait_timeout,
                 )
             except PaddleClientError as exc:
                 if parser_strategy == "full_document" or exc.is_auth_error:
                     raise
-                note = f"Full PDF submit failed, so OCR used rendered pages instead: {exc}"
+                note = f"Full PDF parsing did not finish, so OCR used PDF chunks instead: {exc}"
                 ocr_notes.append(note)
+                if auto_deadline is not None and time.monotonic() >= auto_deadline:
+                    raise PaddleClientError(
+                        f"Auto OCR reached {self.settings.paddle_auto_ocr_timeout_seconds}s before chunk fallback could start: {exc}",
+                        error_name=exc.error_name,
+                    ) from exc
+                return self._parse_pdf_chunks(
+                    job,
+                    source_path,
+                    pages=pages,
+                    parser_model=parser_model,
+                    client=client,
+                    submit_timeout_seconds=timeout_budget(self.settings.paddle_submit_timeout_seconds),
+                    wait_timeout_seconds=timeout_budget(self.settings.paddle_chunk_timeout_seconds),
+                    deadline_monotonic=auto_deadline,
+                )
 
         return self._parse_rendered_pages(job, source_path, pages=pages, parser_model=parser_model, client=client)
+
+    def _parse_pdf_chunks(
+        self,
+        job: JobRecord,
+        source_path: Path,
+        *,
+        pages: int,
+        parser_model: ParserModel,
+        client: PaddleClient,
+        submit_timeout_seconds: int,
+        wait_timeout_seconds: int,
+        deadline_monotonic: float | None = None,
+    ) -> dict[str, Any]:
+        self._check_cancel(job.id)
+        self.store.update_job(
+            job.id,
+            stage="Preparing PDF chunks",
+            message=(
+                f"Splitting the PDF into chunks of up to {self.settings.paddle_chunk_pages} pages "
+                f"or about {self.settings.paddle_chunk_target_mb} MB for Baidu OCR."
+            ),
+            progress_done=0,
+            progress_total=pages,
+        )
+        chunk_dir = job_ocr_dir(self.settings, job.id) / "pdf-chunks"
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+        chunks = split_pdf_chunks(
+            source_path,
+            chunk_dir,
+            chunk_pages=self.settings.paddle_chunk_pages,
+            target_bytes=self.settings.paddle_chunk_target_bytes,
+        )
+        if not chunks:
+            raise PaddleClientError("No PDF chunks were created for Baidu OCR.")
+
+        progress_by_chunk: dict[int, int] = {chunk.index: 0 for chunk in chunks}
+        lock = threading.Lock()
+
+        def total_progress() -> int:
+            return min(pages, sum(progress_by_chunk.values()))
+
+        def chunk_message(chunk_index: int, total_chunks: int, chunk: Any, verb: str) -> str:
+            attempt = int(getattr(chunk, "attempt", 1) or 1)
+            if attempt > 1:
+                parent_label = str(getattr(chunk, "parent_label", chunk.label))
+                variant = str(getattr(chunk, "variant", "source_pdf"))
+                kind = "rasterized retry" if variant == "rasterized_pdf" else "retry"
+                return f"{verb} {kind} for PDF pages {chunk.label} from chunk pages {parent_label}."
+            return f"{verb} PDF chunk {chunk_index} of {total_chunks} (pages {chunk.label})."
+
+        def on_chunk_start(chunk_index: int, total_chunks: int, chunk: Any) -> None:
+            with lock:
+                done = total_progress()
+            self.store.update_job(
+                job.id,
+                stage="Submitting PDF chunks",
+                message=chunk_message(chunk_index, total_chunks, chunk, "Uploading"),
+                progress_done=done,
+                progress_total=pages,
+            )
+
+        def on_chunk_status(chunk_index: int, chunk: Any, status: dict[str, Any]) -> None:
+            update: dict[str, Any] = {
+                "stage": "Reading PDF chunks",
+                "message": chunk_message(chunk_index, len(chunks), chunk, "Baidu is reading"),
+                "progress_total": pages,
+            }
+            if status.get("paddle_job_id"):
+                update["paddle_job_id"] = status["paddle_job_id"]
+            if status.get("jobId"):
+                update["paddle_job_id"] = status["jobId"]
+
+            progress = status.get("progress")
+            with lock:
+                if isinstance(progress, dict):
+                    extracted = int(progress.get("extractedPages") or 0)
+                    progress_by_chunk[chunk_index] = min(chunk.page_count, max(0, extracted))
+                elif status.get("state") == "done":
+                    progress_by_chunk[chunk_index] = chunk.page_count
+                update["progress_done"] = total_progress()
+
+            if status.get("message"):
+                update["message"] = status["message"]
+            self.store.update_job(job.id, **update)
+
+        result = client.parse_pdf_chunks(
+            chunks,
+            model=parser_model,
+            on_chunk_start=on_chunk_start,
+            on_status=on_chunk_status,
+            should_cancel=lambda: self._cancel_requested(job.id),
+            submit_timeout_seconds=submit_timeout_seconds,
+            wait_timeout_seconds=wait_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
+        )
+        self.store.update_job(
+            job.id,
+            stage="Reading PDF chunks",
+            message="Baidu PDF chunk OCR finished.",
+            progress_done=pages,
+            progress_total=pages,
+        )
+        return result
+
+    def _should_start_with_pdf_chunks(self, source_path: Path, pages: int) -> bool:
+        if pages <= 0:
+            return False
+        bytes_per_page = source_path.stat().st_size / pages
+        return (
+            pages >= self.settings.paddle_auto_chunk_min_pages
+            and bytes_per_page >= self.settings.paddle_auto_chunk_min_bytes_per_page
+        )
 
     def _parse_rendered_pages(
         self,
@@ -375,23 +544,19 @@ class JobWorker:
             return
 
         pages_dir = job_pages_dir(self.settings, job_id)
-        missing_pages = [page for page in figure_pages if not _rendered_page_exists(pages_dir, page)]
-        if not missing_pages:
-            return
-
         self.store.update_job(
             job_id,
             stage="Rendering figure crops",
-            message="Rendering source PDF pages that contain diagrams or charts.",
+            message=f"Rendering source PDF pages with diagrams or charts at {self.settings.figure_crop_dpi} DPI.",
             progress_done=0,
-            progress_total=len(missing_pages),
+            progress_total=len(figure_pages),
         )
-        for done, page_number in enumerate(missing_pages, start=1):
+        for done, page_number in enumerate(figure_pages, start=1):
             self._check_cancel(job_id)
             render_pdf_pages(
                 source_path,
                 pages_dir,
-                dpi=self.settings.snapshot_dpi,
+                dpi=self.settings.figure_crop_dpi,
                 first_page=page_number,
                 last_page=page_number,
             )
@@ -461,14 +626,3 @@ class JobWorker:
 def delete_job_files(settings: Settings, job_id: str) -> None:
     for path in job_dirs(settings, job_id):
         shutil.rmtree(path, ignore_errors=True)
-
-
-def _rendered_page_exists(directory: Path, page_number: int) -> bool:
-    for candidate in (directory / f"page-{page_number:02d}.png", directory / f"page-{page_number}.png"):
-        if candidate.exists():
-            return True
-    for candidate in directory.glob("page-*.png"):
-        suffix = candidate.stem.rsplit("-", 1)[-1]
-        if suffix.isdigit() and int(suffix) == page_number:
-            return True
-    return False

@@ -51,7 +51,8 @@ a { color: inherit; }
 img { max-width: 100%; height: auto; display: block; margin: 0.8em auto; }
 figure { margin: 1em 0; page-break-inside: avoid; break-inside: avoid; }
 figcaption { font-size: 0.9em; line-height: 1.35; margin-top: 0.4em; }
-.preserved-figure img { width: 100%; max-width: 100%; }
+.preserved-figure { margin-left: 0; margin-right: 0; text-align: center; }
+.preserved-figure img { width: 100%; max-width: 100%; height: auto; }
 .page-snapshot { margin: 0 0 1.2em; }
 .page-snapshot img { width: 100%; max-width: 100%; }
 .ocr-text { border-top: 1px solid #aaa; margin-top: 1em; padding-top: 0.8em; }
@@ -663,6 +664,7 @@ def _collect_preserved_figures(
                         continue
                     crop = image.crop(crop_box)
                     crop = _remove_page_header_from_crop(crop)
+                    crop = _trim_outer_whitespace(crop)
                     if crop.width < 32 or crop.height < 32:
                         continue
 
@@ -1102,6 +1104,32 @@ def _remove_page_header_from_crop(image: Image.Image) -> Image.Image:
         return image.crop((0, top, width, height))
 
     return image
+
+
+def _trim_outer_whitespace(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    if width < 80 or height < 80:
+        return image
+
+    mask = image.convert("L").point(lambda pixel: 255 if pixel < 250 else 0)
+    bbox = mask.getbbox()
+    if not bbox:
+        return image
+
+    left, top, right, bottom = bbox
+    content_width = right - left
+    content_height = bottom - top
+    if content_width < 32 or content_height < 32:
+        return image
+    if content_width / width > 0.96 and content_height / height > 0.96:
+        return image
+
+    padding = max(8, min(24, int(min(width, height) * 0.03)))
+    left = max(0, left - padding)
+    top = max(0, top - padding)
+    right = min(width, right + padding)
+    bottom = min(height, bottom + padding)
+    return image.crop((left, top, right, bottom))
 
 
 def _expanded_visual_crop(

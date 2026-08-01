@@ -4,6 +4,7 @@ import base64
 import hashlib
 import mimetypes
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ import httpx
 
 
 DATA_URL_RE = re.compile(r"^data:(?P<mime>[-\w.+/]+);base64,(?P<body>.+)$", re.DOTALL)
+REMOTE_ASSET_FETCH_WORKERS = 12
+REMOTE_ASSET_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass
@@ -34,7 +37,8 @@ def collect_paddle_assets(
         return bundle
 
     assets_dir.mkdir(parents=True, exist_ok=True)
-    seen_values: dict[str, str] = {}
+    keys_by_value: dict[str, list[str]] = {}
+    ordered_values: list[str] = []
     total_bytes = 0
 
     for page in raw_result.get("pages", []):
@@ -47,34 +51,45 @@ def collect_paddle_assets(
             for key, value in mapped.items():
                 if not isinstance(key, str) or not isinstance(value, str) or not value:
                     continue
-                if value in seen_values:
-                    _remember_key(bundle.image_map, key, seen_values[value])
-                    continue
+                if value not in keys_by_value:
+                    keys_by_value[value] = []
+                    ordered_values.append(value)
+                keys_by_value[value].append(key)
 
-                try:
-                    content, mime, extension = _read_asset(value)
-                except Exception as exc:
-                    bundle.warnings.append(f"Could not read OCR image {key}: {exc}")
-                    continue
+    remote_assets = _read_remote_assets([value for value in ordered_values if _is_http_url(value)])
 
-                if len(content) > max_image_bytes:
-                    bundle.warnings.append(f"Skipped OCR image {key}: image exceeds configured size guardrail.")
-                    continue
-                if total_bytes + len(content) > max_total_bytes:
-                    bundle.warnings.append("Skipped remaining OCR images: total asset guardrail reached.")
-                    continue
+    for value in ordered_values:
+        keys = keys_by_value[value]
+        try:
+            if value in remote_assets:
+                fetched = remote_assets[value]
+                if isinstance(fetched, Exception):
+                    raise fetched
+                content, mime, extension = fetched
+            else:
+                content, mime, extension = _read_asset(value)
+        except Exception as exc:
+            bundle.warnings.append(f"Could not read OCR image {keys[0]}: {exc}")
+            continue
 
-                digest = hashlib.sha256(content).hexdigest()[:20]
-                filename = f"{digest}.{extension}"
-                target = assets_dir / filename
-                if not target.exists():
-                    target.write_bytes(content)
+        if len(content) > max_image_bytes:
+            bundle.warnings.append(f"Skipped OCR image {keys[0]}: image exceeds configured size guardrail.")
+            continue
+        if total_bytes + len(content) > max_total_bytes:
+            bundle.warnings.append("Skipped remaining OCR images: total asset guardrail reached.")
+            continue
 
-                href = f"assets/{filename}"
-                total_bytes += len(content)
-                seen_values[value] = href
-                bundle.manifest_items[href] = mime
-                _remember_key(bundle.image_map, key, href)
+        digest = hashlib.sha256(content).hexdigest()[:20]
+        filename = f"{digest}.{extension}"
+        target = assets_dir / filename
+        if not target.exists():
+            target.write_bytes(content)
+
+        href = f"assets/{filename}"
+        total_bytes += len(content)
+        bundle.manifest_items[href] = mime
+        for key in keys:
+            _remember_key(bundle.image_map, key, href)
 
     return bundle
 
@@ -125,14 +140,7 @@ def _read_asset(value: str) -> tuple[bytes, str, str]:
 
     parsed = urlparse(value)
     if parsed.scheme in {"http", "https"}:
-        with httpx.Client(timeout=60.0, follow_redirects=True) as client:
-            response = client.get(value)
-            response.raise_for_status()
-            content = response.content
-            header_mime = response.headers.get("content-type", "").split(";", 1)[0]
-            detected_mime = _mime_from_bytes(content)
-            mime = header_mime if header_mime.startswith("image/") else detected_mime
-            return content, mime, _extension_for(mime, parsed.path)
+        return _read_http_asset(value)
 
     path = Path(value)
     if path.exists():
@@ -146,6 +154,40 @@ def _read_asset(value: str) -> tuple[bytes, str, str]:
         raise ValueError("asset value is not a URL, file path, data URL, or base64 blob") from exc
     mime = _mime_from_bytes(content)
     return content, mime, _extension_for(mime, "")
+
+
+def _read_remote_assets(values: list[str]) -> dict[str, tuple[bytes, str, str] | Exception]:
+    if not values:
+        return {}
+
+    results: dict[str, tuple[bytes, str, str] | Exception] = {}
+    max_workers = max(1, min(REMOTE_ASSET_FETCH_WORKERS, len(values)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_by_value = {executor.submit(_read_http_asset, value): value for value in values}
+        for future in as_completed(future_by_value):
+            value = future_by_value[future]
+            try:
+                results[value] = future.result()
+            except Exception as exc:
+                results[value] = exc
+    return results
+
+
+def _read_http_asset(value: str) -> tuple[bytes, str, str]:
+    parsed = urlparse(value)
+    timeout = httpx.Timeout(REMOTE_ASSET_TIMEOUT_SECONDS, connect=10.0)
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        response = client.get(value)
+        response.raise_for_status()
+        content = response.content
+        header_mime = response.headers.get("content-type", "").split(";", 1)[0]
+        detected_mime = _mime_from_bytes(content)
+        mime = header_mime if header_mime.startswith("image/") else detected_mime
+        return content, mime, _extension_for(mime, parsed.path)
+
+
+def _is_http_url(value: str) -> bool:
+    return urlparse(value).scheme in {"http", "https"}
 
 
 def _mime_from_bytes(content: bytes) -> str:

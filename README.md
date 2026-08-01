@@ -17,7 +17,7 @@ The previous Vercel/Blob implementation is preserved on the
 - Baidu document parsing through the official TypeScript SDK, with selectable
   `PaddleOCR-VL-1.6`, `PaddleOCR-VL-1.5`, `PaddleOCR-VL`, and `PP-StructureV3`
   models
-- Automatic OCR retry path: full-PDF submit first, then rendered page-by-page
+- Automatic OCR retry path: full-PDF submit first, then parallel PDF chunks
   OCR if Baidu does not accept the PDF upload promptly
 - EPUB builder that preserves OCR Markdown, sanitized raw HTML tables/figures,
   Paddle image assets, PNG formula images for plain EPUB, and MathML formulas
@@ -83,13 +83,24 @@ LOCAL_PORT=8000
 LOCAL_PADDLE_MODE=live
 LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
 LOCAL_INCLUDE_PAGE_SNAPSHOTS=true
-LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=500
+LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS=180
+LOCAL_PADDLE_AUTO_OCR_TIMEOUT_SECONDS=300
+LOCAL_PADDLE_STATUS_TIMEOUT_SECONDS=30
+LOCAL_PADDLE_CHUNK_PAGES=2
+LOCAL_PADDLE_CHUNK_TARGET_MB=1
+LOCAL_PADDLE_CHUNK_CONCURRENCY=12
+LOCAL_PADDLE_CHUNK_TIMEOUT_SECONDS=180
+LOCAL_PADDLE_CHUNK_RETRIES=1
+LOCAL_PADDLE_CHUNK_RETRY_RASTER_DPI=160
+LOCAL_PADDLE_AUTO_CHUNK_MIN_PAGES=20
+LOCAL_PADDLE_AUTO_CHUNK_MIN_BYTES_PER_PAGE=350000
 LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS=120
 LOCAL_PADDLE_PAGE_SUBMIT_RETRIES=2
 LOCAL_PADDLE_POLL_SECONDS=5
 LOCAL_WORKER_POLL_SECONDS=1
 LOCAL_CREATE_KEPUB_DEFAULT=false
 LOCAL_SNAPSHOT_DPI=120
+LOCAL_FIGURE_CROP_DPI=240
 LOCAL_MATH_REPAIR_PROVIDER=off
 LOCAL_LLM_REQUEST_TIMEOUT_SECONDS=60
 LOCAL_LLM_MAX_FAILED_FORMULAS_PER_JOB=200
@@ -147,10 +158,14 @@ and put back on the local worker queue.
 During Baidu submission, progress can only include a remote `paddle_job_id`
 after Baidu accepts the upload. To avoid jobs looking frozen at `0/N`, the app
 now shows the specific stage: full-PDF submit, rendered-page submit, or remote
-page OCR. In Auto retry mode, a full-PDF submit timeout switches to rendered
-page-by-page OCR. If OCR still fails after retries, the job fails clearly; use
-the original PDF in Kobo, KOReader, or another PDF reader when you want visual
-page fidelity.
+page OCR. In Auto retry mode, image-heavy PDFs go straight to PDF chunks, and
+full-PDF timeouts switch to PDF chunks instead of the slower rendered-page OCR
+path. `Rendered pages` is still available as an explicit OCR path for files
+where Baidu cannot parse PDF input at all. If OCR still fails after retries, the
+worker retries the failed chunk as smaller page-level PDF submissions. If those
+page resubmits also fail, the job fails clearly instead of inserting local
+fallback text; use the original PDF in Kobo, KOReader, or another PDF reader
+when you want visual page fidelity.
 
 Job files live here:
 
@@ -182,8 +197,11 @@ Document jobs have two parser controls:
   `PaddleOCR-VL`, or `PP-StructureV3` when a document mostly converts well but a
   specific equation/table/figure is wrong.
 - `OCR path`: keep `Auto retry` for normal use. `Full PDF only` is useful when
-  you want to test Baidu's direct PDF parser. `Rendered pages` skips full-PDF
-  upload and sends locally rendered page images one by one.
+  you want to test Baidu's direct PDF parser. `PDF chunks` splits the source PDF
+  into small batches and submits them in parallel, which is the preferred
+  fallback for image-heavy papers. `Rendered pages` skips full-PDF upload and
+  sends locally rendered page images one by one; use it only when Baidu cannot
+  parse the PDF itself.
 - `Math repair`: `Off`, `Gemini`, `Baidu AI Studio`, or either fallback chain.
   The selected provider is called only for formulas that fail local MathJax
   conversion. Plain EPUB repairs target PNG rendering; Kobo KEPUB repairs target
@@ -250,20 +268,43 @@ while the local worker keeps running.
 OCR timeout controls:
 
 - `LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS`: how long to wait for Baidu to accept a
-  full-PDF upload before Auto retry switches to rendered pages. Default: 500
+  full-PDF upload before Auto retry can switch away from it. Default: 180
   seconds.
+- `LOCAL_PADDLE_AUTO_OCR_TIMEOUT_SECONDS`: total OCR budget for the Auto path
+  before the worker fails the job instead of drifting into a long retry loop.
+  Default: 300 seconds.
+- `LOCAL_PADDLE_CHUNK_PAGES`: how many PDF pages to put in each fallback chunk.
+  Default: 2.
+- `LOCAL_PADDLE_CHUNK_TARGET_MB`: approximate target size for PDF chunks. The
+  chunker starts a new chunk before this size when possible, while never
+  splitting a single source page. Default: 1 MB.
+- `LOCAL_PADDLE_CHUNK_CONCURRENCY`: how many PDF chunks to submit to Baidu at
+  once. Default: 12.
+- `LOCAL_PADDLE_CHUNK_TIMEOUT_SECONDS`: per-chunk Baidu polling budget. Default:
+  180 seconds.
+- `LOCAL_PADDLE_CHUNK_RETRIES`: how many retry rounds to run for failed PDF
+  chunks. Multi-page chunks are split into single-page PDFs before retrying.
+  Default: 1.
+- `LOCAL_PADDLE_CHUNK_RETRY_RASTER_DPI`: when a failed retry page is still
+  larger than `LOCAL_PADDLE_CHUNK_TARGET_MB`, resubmit a lightweight rasterized
+  one-page PDF to Baidu. Set to `0` to disable. Default: 160 DPI.
+- `LOCAL_FIGURE_CROP_DPI`: resolution used when rendering source pages for
+  preserved figure crops. Default: 240 DPI.
 - `LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS`: how long each rendered page upload
   can take.
 - `LOCAL_PADDLE_PAGE_SUBMIT_RETRIES`: rendered-page upload attempts per page.
 
-The slowest path is Auto retry on large, image-heavy PDFs. The worker first
-waits up to `LOCAL_PADDLE_SUBMIT_TIMEOUT_SECONDS` for Baidu to accept the full
-PDF. If that times out, it renders the pages locally and sends them to Baidu one
-at a time, with up to `LOCAL_PADDLE_PAGE_SUBMIT_TIMEOUT_SECONDS` per page and
-`LOCAL_PADDLE_PAGE_SUBMIT_RETRIES` attempts. This preserves a chance to use the
-better full-PDF parser, but it can add several minutes before fallback even
-starts. Use `OCR path: Rendered pages` to skip the initial full-PDF wait for
-PDFs that repeatedly time out on full submit.
+The slowest path is rendered-page OCR, because it creates one Baidu job per page.
+Auto avoids that path by default. For large, image-heavy PDFs, Auto skips the
+full-PDF wait and submits small parallel PDF chunks. The default chunk size is
+two pages so a slow chart-heavy page does not trap a larger page range until the
+end of the job. For smaller PDFs, Auto tries the full PDF first, but stops
+within the configured Auto budget and then uses PDF chunks if time remains. Use
+`OCR path: Rendered pages` only as a manual escape hatch for PDFs that Baidu
+cannot parse as PDF chunks. If an individual PDF chunk times out, it is
+resubmitted once as single-page PDF input; if the retry page is unusually large,
+the app rasterizes that page into a smaller one-page PDF before resubmitting it
+to Baidu. If the resubmitted page still fails, the job fails clearly.
 
 ## Test Set
 
