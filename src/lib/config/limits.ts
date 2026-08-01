@@ -8,7 +8,7 @@ function optionalMbLimit(name: string, fallback: number) {
 }
 
 export function maxPdfSizeBytes() {
-  return optionalMbLimit("MAX_PDF_SIZE_MB", Number.POSITIVE_INFINITY);
+  return optionalMbLimit("MAX_PDF_SIZE_MB", 1024);
 }
 
 export function maxPdfUploadBytes() {
@@ -17,7 +17,7 @@ export function maxPdfUploadBytes() {
 }
 
 export function maxPdfPages() {
-  return readOptionalLimitNumberEnv("MAX_PDF_PAGES", Number.POSITIVE_INFINITY);
+  return readOptionalLimitNumberEnv("MAX_PDF_PAGES", 1000);
 }
 
 export function jobExpirationMinutes() {
@@ -25,11 +25,15 @@ export function jobExpirationMinutes() {
 }
 
 export function maxImageSizeBytes() {
-  return optionalMbLimit("MAX_IMAGE_SIZE_MB", Number.POSITIVE_INFINITY);
+  return optionalMbLimit("MAX_IMAGE_SIZE_MB", 256);
 }
 
 export function maxTotalAssetBytes() {
-  return optionalMbLimit("MAX_TOTAL_ASSET_MB", Number.POSITIVE_INFINITY);
+  return optionalMbLimit("MAX_TOTAL_ASSET_MB", 1024);
+}
+
+export function pdfInspectionMaxBytes() {
+  return optionalMbLimit("PDF_INSPECTION_MAX_MB", 256);
 }
 
 export function finalizeImagePageBatchSize() {

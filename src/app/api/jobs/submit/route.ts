@@ -7,9 +7,14 @@ import { pipeline } from "node:stream/promises";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertPathBelongsToJob } from "@/lib/blob/paths";
-import { getPrivateBlobStream, readPrivateBlobBuffer, readPrivateBlobPrefix } from "@/lib/blob/io";
+import {
+  getPrivateBlobStream,
+  headPrivateBlob,
+  readPrivateBlobBuffer,
+  readPrivateBlobPrefix
+} from "@/lib/blob/io";
 import { createSignedGetUrl } from "@/lib/blob/signed-url";
-import { maxPdfPages, maxPdfSizeBytes } from "@/lib/config/limits";
+import { maxPdfPages, maxPdfSizeBytes, pdfInspectionMaxBytes } from "@/lib/config/limits";
 import { bufferHasPdfSignature } from "@/lib/files/pdf";
 import { sanitizeMetadataText } from "@/lib/files/sanitize";
 import { jsonError, requireSession } from "@/lib/http/api";
@@ -28,8 +33,15 @@ const submitSchema = z.object({
 });
 
 async function inspectUploadedPdf(inputPath: string) {
+  const blob = await headPrivateBlob(inputPath);
+  const sizeLimit = maxPdfSizeBytes();
+  if (Number.isFinite(sizeLimit) && blob.size > sizeLimit) {
+    throw new Error("This PDF exceeds the configured size limit.");
+  }
+
   const pageLimit = maxPdfPages();
-  if (!Number.isFinite(pageLimit)) {
+  const inspectionLimit = pdfInspectionMaxBytes();
+  if (!Number.isFinite(pageLimit) || (Number.isFinite(inspectionLimit) && blob.size > inspectionLimit)) {
     const prefix = await readPrivateBlobPrefix(inputPath, 8);
     if (!bufferHasPdfSignature(prefix)) {
       return {
@@ -45,7 +57,7 @@ async function inspectUploadedPdf(inputPath: string) {
     };
   }
 
-  const pdfBytes = await readPrivateBlobBuffer(inputPath, maxPdfSizeBytes());
+  const pdfBytes = await readPrivateBlobBuffer(inputPath, inspectionLimit);
   const inspection = await inspectPdfBytes(pdfBytes, pageLimit);
   if (!inspection.ok) {
     return inspection;

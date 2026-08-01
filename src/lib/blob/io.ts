@@ -1,4 +1,4 @@
-import { get } from "@vercel/blob";
+import { BlobNotFoundError, get, head } from "@vercel/blob";
 
 async function getPrivateBlob(pathname: string) {
   const result = await get(pathname, {
@@ -83,4 +83,15 @@ export async function readPrivateBlobPrefix(pathname: string, maxBytes: number) 
 
 export async function getPrivateBlobStream(pathname: string) {
   return getPrivateBlob(pathname);
+}
+
+export async function headPrivateBlob(pathname: string) {
+  try {
+    return await head(pathname);
+  } catch (error) {
+    if (error instanceof BlobNotFoundError) {
+      throw new Error("The temporary file has already been deleted.");
+    }
+    throw error;
+  }
 }
