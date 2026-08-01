@@ -164,6 +164,8 @@ Comic jobs have two KCC controls:
 
 - `Output`: Kobo KEPUB, plain EPUB, or CBZ.
 - `Layout`: manga right-to-left, comic left-to-right, or webtoon/long strip.
+  The default is Kobo KEPUB + webtoon/long strip because that gave the best
+  result for tall PDF chapters on Kobo Clara Colour.
 
 ## Math And Kobo
 

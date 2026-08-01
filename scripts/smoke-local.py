@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["fixture", "live"], default="fixture")
     parser.add_argument("--conversion-mode", choices=["document", "comic"], default="document")
     parser.add_argument("--comic-output-format", choices=["kepub", "epub", "cbz"], default="kepub")
-    parser.add_argument("--comic-layout", choices=["manga", "comic", "webtoon"], default="manga")
+    parser.add_argument("--comic-layout", choices=["manga", "comic", "webtoon"], default="webtoon")
     parser.add_argument("--snapshot-dpi", type=int, default=96)
     parser.add_argument("--allow-small", action="store_true", help="Allow PDFs under 100 pages.")
     parser.add_argument("--epubcheck", action="store_true", help="Run EPUBCheck when EPUBCHECK_JAR is available.")

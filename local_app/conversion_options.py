@@ -13,7 +13,7 @@ COMIC_LAYOUTS: tuple[ComicLayout, ...] = ("manga", "comic", "webtoon")
 
 DEFAULT_CONVERSION_MODE: ConversionMode = "document"
 DEFAULT_COMIC_OUTPUT_FORMAT: ComicOutputFormat = "kepub"
-DEFAULT_COMIC_LAYOUT: ComicLayout = "manga"
+DEFAULT_COMIC_LAYOUT: ComicLayout = "webtoon"
 
 
 def normalize_conversion_mode(value: str | None) -> ConversionMode:
