@@ -229,7 +229,7 @@ def build_epub(
     author = _clean_text(author)
 
     pages = _result_pages(raw_result)
-    markdown_pages = [str(page.get("markdownText", "")) for page in pages]
+    markdown_pages = [_markdown_with_formula_numbers(page) for page in pages]
     math_renderer = (
         MathMLRenderer(repairer=math_repairer)
         if math_output == "mathml"
@@ -254,7 +254,7 @@ def build_epub(
 
     for index in range(max_pages):
         page_number = index + 1
-        markdown = pages[index].get("markdownText", "") if index < len(pages) else ""
+        markdown = markdown_pages[index] if index < len(markdown_pages) else ""
         markdown = _inject_preserved_figures(markdown, preserved_figures.get(page_number, []))
         body_parts = [f'<section class="page" id="page-{page_number}">', f"<h2>Page {page_number}</h2>"]
 
@@ -502,6 +502,121 @@ def _result_pages(raw_result: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(pages, list):
         return []
     return [page for page in pages if isinstance(page, dict)]
+
+
+def _markdown_with_formula_numbers(page: dict[str, Any]) -> str:
+    markdown = str(page.get("markdownText", ""))
+    if not markdown:
+        return markdown
+
+    for latex, tag in _separate_formula_number_tags(page):
+        markdown = _insert_display_formula_tag(markdown, latex, tag)
+    return markdown
+
+
+def _separate_formula_number_tags(page: dict[str, Any]) -> list[tuple[str, str]]:
+    items = _layout_items(page)
+    if not items:
+        return []
+
+    number_items = [
+        (index, item)
+        for index, item in enumerate(items)
+        if item["label"] == "formula_number" and item["bbox"] and _is_formula_number_text(item["text"])
+    ]
+    used_numbers: set[int] = set()
+    pairs: list[tuple[str, str]] = []
+
+    for item in items:
+        if item["label"] != "display_formula" or not item["bbox"]:
+            continue
+        latex = _strip_math_delimiters(item["text"])
+        if not latex or _latex_has_tag(latex):
+            continue
+        number_index = _nearest_formula_number(item["bbox"], number_items, used_numbers)
+        if number_index is None:
+            continue
+        used_numbers.add(number_index)
+        number_text = _clean_text(items[number_index]["text"])
+        pairs.append((latex, number_text))
+
+    return pairs
+
+
+def _nearest_formula_number(
+    formula_bbox: tuple[float, float, float, float],
+    number_items: list[tuple[int, dict[str, Any]]],
+    used_numbers: set[int],
+) -> int | None:
+    best_index: int | None = None
+    best_score: float | None = None
+    fx1, fy1, fx2, fy2 = formula_bbox
+    formula_height = fy2 - fy1
+    formula_center_y = (fy1 + fy2) / 2.0
+
+    for index, item in number_items:
+        if index in used_numbers:
+            continue
+        nx1, ny1, _nx2, ny2 = item["bbox"]
+        number_center_y = (ny1 + ny2) / 2.0
+        if abs(number_center_y - formula_center_y) > max(24.0, formula_height * 0.8):
+            continue
+        if nx1 < fx1 - 24.0:
+            continue
+        score = abs(number_center_y - formula_center_y) + max(0.0, fx2 - nx1) * 0.2
+        if best_score is None or score < best_score:
+            best_score = score
+            best_index = index
+
+    return best_index
+
+
+def _insert_display_formula_tag(markdown: str, latex: str, tag: str) -> str:
+    target = _normalize_latex_for_match(latex)
+    if not target:
+        return markdown
+
+    replaced = False
+    pattern = re.compile(r"(?P<open>\$\$|\\\[)(?P<body>.*?)(?P<close>\$\$|\\\])", flags=re.DOTALL)
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal replaced
+        if replaced:
+            return match.group(0)
+        body = match.group("body")
+        if _latex_has_tag(body) or _normalize_latex_for_match(body) != target:
+            return match.group(0)
+
+        stripped = body.rstrip()
+        trailing = body[len(stripped) :]
+        replaced = True
+        return f'{match.group("open")}{stripped} \\tag*{{{tag}}}{trailing}{match.group("close")}'
+
+    return pattern.sub(replace, markdown)
+
+
+def _strip_math_delimiters(value: str) -> str:
+    stripped = _clean_text(value)
+    if stripped.startswith("$$") and stripped.endswith("$$") and len(stripped) > 4:
+        return stripped[2:-2].strip()
+    if stripped.startswith("\\[") and stripped.endswith("\\]") and len(stripped) > 4:
+        return stripped[2:-2].strip()
+    if stripped.startswith("$") and stripped.endswith("$") and len(stripped) > 2:
+        return stripped[1:-1].strip()
+    return stripped
+
+
+def _latex_has_tag(value: str) -> bool:
+    return bool(re.search(r"\\tag\*?\s*\{", value))
+
+
+def _is_formula_number_text(value: str) -> bool:
+    return bool(re.fullmatch(r"\(?[A-Za-z]?\d+(?:[.\-]\d+)?[A-Za-z]?\)?", _clean_text(value)))
+
+
+def _normalize_latex_for_match(value: str) -> str:
+    without_tag = re.sub(r"\\tag\*?\s*\{[^{}]*\}", "", _strip_math_delimiters(value))
+    return re.sub(r"\s+", "", without_tag)
 
 
 def figure_crop_page_numbers(raw_result: dict[str, Any] | None) -> set[int]:

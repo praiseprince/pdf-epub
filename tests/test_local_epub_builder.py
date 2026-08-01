@@ -154,6 +154,57 @@ def test_epub_builder_keeps_unrenderable_math_as_visible_source(tmp_path: Path) 
     assert "\\frac{1}{" in chapter
 
 
+def test_epub_builder_restores_separate_formula_number_tags(tmp_path: Path) -> None:
+    raw_result = {
+        "jobId": "fixture",
+        "pages": [
+            {
+                "markdownText": """
+The third integral is:
+
+$$ \\frac{dL}{d\\theta}=-\\int_{t_1}^{t_0} a(t)\\frac{\\partial f}{\\partial\\theta}dt $$
+""",
+                "markdownImages": {},
+                "outputImages": {},
+                "prunedResult": {
+                    "width": 1200,
+                    "height": 1600,
+                    "parsing_res_list": [
+                        {
+                            "block_label": "display_formula",
+                            "block_bbox": [250, 400, 900, 460],
+                            "block_content": " $$ \\frac{dL}{d\\theta}=-\\int_{t_1}^{t_0} a(t)\\frac{\\partial f}{\\partial\\theta}dt $$ ",
+                        },
+                        {
+                            "block_label": "formula_number",
+                            "block_bbox": [1040, 415, 1070, 440],
+                            "block_content": "(5)",
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+
+    result = build_epub(
+        output_path=tmp_path / "numbered-math.epub",
+        title="Numbered Math",
+        author="",
+        original_filename="numbered-math.pdf",
+        raw_result=raw_result,
+        bundle=merge_bundles(),
+        snapshot_paths=[],
+        snapshot_source_dir=tmp_path / "pages",
+        assets_source_dir=tmp_path / "assets",
+    )
+
+    with zipfile.ZipFile(result.output_path) as epub:
+        chapter = epub.read("EPUB/text/page-0001.xhtml").decode("utf-8")
+
+    assert "\\tag*{(5)}" in chapter
+    assert "math-block" in chapter
+
+
 def test_epub_builder_uses_ai_repair_after_mathjax_failure(tmp_path: Path) -> None:
     class FakeRepairer:
         def repair_failed_formulas(self, failures, warnings):
