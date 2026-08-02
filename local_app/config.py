@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     local_paddle_python: Path = Field(Path(".venv_paddleocr/bin/python"), alias="LOCAL_PADDLE_PYTHON")
     local_paddle_pipeline_version: str = Field("v1.6", alias="LOCAL_PADDLE_PIPELINE_VERSION")
     local_paddle_device: str = Field("cpu", alias="LOCAL_PADDLE_DEVICE")
+    local_paddle_vl_backend: str = Field("", alias="LOCAL_PADDLE_VL_BACKEND")
+    local_paddle_vl_server_url: str = Field("", alias="LOCAL_PADDLE_VL_SERVER_URL")
+    local_paddle_vl_api_model_name: str = Field("PaddlePaddle/PaddleOCR-VL-1.6", alias="LOCAL_PADDLE_VL_API_MODEL_NAME")
+    local_paddle_vl_max_concurrency: int = Field(4, alias="LOCAL_PADDLE_VL_MAX_CONCURRENCY")
     local_ocr_dpi: int = Field(120, alias="LOCAL_OCR_DPI")
 
     max_pdf_size_mb: int = Field(200, alias="MAX_PDF_SIZE_MB")

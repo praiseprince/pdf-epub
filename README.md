@@ -99,6 +99,52 @@ npm run local:run
 
 Open `http://127.0.0.1:8000/login`.
 
+## Local Launchers
+
+For normal use, prefer the packaged launchers instead of remembering the raw
+uvicorn command:
+
+```sh
+. .venv/bin/activate
+npm run local:package
+```
+
+This writes launchers under ignored `dist/`:
+
+```text
+dist/PDF to EPUB.app
+dist/PDF to EPUB.command
+dist/PDF to EPUB MLX.command
+dist/PDF to EPUB Tunnel.command
+dist/PDF to EPUB Tunnel MLX.command
+```
+
+Double-click a `.command` file to run in Terminal, or double-click
+`PDF to EPUB.app` to open Terminal and start the local server. Press `Ctrl-C` in
+that Terminal window to stop the app.
+
+Command equivalents:
+
+```sh
+npm run local:app       # local app only
+npm run local:mlx       # local app plus MLX Apple GPU VLM service
+npm run local:tunnel    # local app plus temporary Cloudflare URL
+```
+
+The MLX mode uses Apple GPU acceleration for PaddleOCR-VL's VLM recognition
+stage through the `mlx-vlm` server. It still runs layout/PDF rendering locally,
+and it still stores jobs under `data/`. Install it in the PaddleOCR environment
+when you want that path:
+
+```sh
+.venv_paddleocr/bin/python -m pip install "mlx-vlm>=0.3.11"
+```
+
+Cloudflare quick tunnels are for temporary sharing/testing. They proxy your
+local app to a random `trycloudflare.com` HTTPS URL while `cloudflared` is
+running. The PIN still protects the app, but do not share the URL casually if
+you are uploading private PDFs.
+
 ## Environment
 
 Typical private `.env`:

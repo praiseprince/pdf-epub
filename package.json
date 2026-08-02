@@ -6,6 +6,10 @@
   "scripts": {
     "local:run": "python -m uvicorn local_app.main:app --reload --reload-dir local_app --host 127.0.0.1 --port 8000",
     "local:secrets": "python3 scripts/generate-local-secrets.py",
+    "local:app": "python3 scripts/run-app.py",
+    "local:tunnel": "python3 scripts/run-app.py --tunnel",
+    "local:mlx": "python3 scripts/run-app.py --mlx",
+    "local:package": "python3 scripts/package-local.py",
     "local:smoke": "python3 scripts/smoke-local.py",
     "testset:download": "python3 scripts/download-testset.py",
     "python:test": "pytest",

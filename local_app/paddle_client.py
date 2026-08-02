@@ -338,6 +338,10 @@ class PaddleClient:
             "checkpointDir": str(checkpoint_dir),
             "pipelineVersion": self.settings.local_paddle_pipeline_version,
             "device": self.settings.local_paddle_device,
+            "vlBackend": self.settings.local_paddle_vl_backend,
+            "vlServerUrl": self.settings.local_paddle_vl_server_url,
+            "vlApiModelName": self.settings.local_paddle_vl_api_model_name,
+            "vlMaxConcurrency": self.settings.local_paddle_vl_max_concurrency,
         }
         runner = Path(__file__).parent / "local_paddle_runner.py"
         proc = subprocess.Popen(

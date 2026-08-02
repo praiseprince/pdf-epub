@@ -18,6 +18,10 @@ def main() -> int:
     checkpoint_raw = str(payload.get("checkpointDir") or "")
     pipeline_version = str(payload.get("pipelineVersion") or "v1.6")
     device = str(payload.get("device") or "cpu")
+    vl_backend = str(payload.get("vlBackend") or "")
+    vl_server_url = str(payload.get("vlServerUrl") or "")
+    vl_api_model_name = str(payload.get("vlApiModelName") or "")
+    vl_max_concurrency = int(payload.get("vlMaxConcurrency") or 0)
 
     if not isinstance(images, list) or not images:
         _event({"event": "error", "message": "No page images were provided."})
@@ -35,10 +39,26 @@ def main() -> int:
         _event({"event": "error", "message": f"Could not import PaddleOCRVL: {exc}"})
         return 2
 
-    _event({"event": "model_loading", "pipelineVersion": pipeline_version, "device": device})
+    _event(
+        {
+            "event": "model_loading",
+            "pipelineVersion": pipeline_version,
+            "device": device,
+            "vlBackend": vl_backend,
+        }
+    )
     started = time.monotonic()
     try:
-        pipeline = PaddleOCRVL(pipeline_version=pipeline_version, device=device)
+        pipeline_kwargs: dict[str, Any] = {"pipeline_version": pipeline_version, "device": device}
+        if vl_backend:
+            pipeline_kwargs["vl_rec_backend"] = vl_backend
+        if vl_server_url:
+            pipeline_kwargs["vl_rec_server_url"] = vl_server_url
+        if vl_api_model_name:
+            pipeline_kwargs["vl_rec_api_model_name"] = vl_api_model_name
+        if vl_max_concurrency > 0:
+            pipeline_kwargs["vl_rec_max_concurrency"] = vl_max_concurrency
+        pipeline = PaddleOCRVL(**pipeline_kwargs)
     except TypeError:
         pipeline = PaddleOCRVL(pipeline_version=pipeline_version)
     except Exception as exc:
