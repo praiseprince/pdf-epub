@@ -10,6 +10,12 @@ const jobsTable = document.querySelector("#jobs-table");
 const jobsBody = document.querySelector("#jobs-body");
 const jobsEmpty = document.querySelector("#jobs-empty");
 const refreshButton = document.querySelector("#refresh-jobs");
+const runtimeOcr = document.querySelector("#runtime-ocr");
+const runtimeOcrState = document.querySelector("#runtime-ocr-state");
+const startTunnelButton = document.querySelector("#start-tunnel");
+const stopTunnelButton = document.querySelector("#stop-tunnel");
+const tunnelLink = document.querySelector("#tunnel-link");
+const runtimeMessage = document.querySelector("#runtime-message");
 
 let polling = null;
 
@@ -63,6 +69,15 @@ async function requestJson(url, options = {}) {
 async function loadJobs() {
   const data = await requestJson("/api/jobs");
   renderJobs(data.jobs || []);
+}
+
+async function loadRuntime() {
+  const data = await requestJson("/api/runtime");
+  renderRuntime(data);
+}
+
+async function refreshAll() {
+  await Promise.all([loadJobs(), loadRuntime()]);
 }
 
 function renderJobs(jobs) {
@@ -151,6 +166,90 @@ async function deleteJob(jobId) {
   await loadJobs();
 }
 
+function renderRuntime(data) {
+  if (!data || !runtimeOcr) return;
+  const backend = data.ocr_backend || "cpu";
+  const mlx = data.mlx_server || {};
+  const tunnel = data.tunnel || {};
+
+  if (runtimeOcr.value !== backend) runtimeOcr.value = backend;
+  if (runtimeOcrState) {
+    runtimeOcrState.textContent = backend === "mlx" ? mlxStatusText(mlx) : "CPU";
+    runtimeOcrState.className = backend === "mlx" && !mlx.available ? "runtime-warning" : "";
+  }
+
+  const tunnelRunning = Boolean(tunnel.running);
+  const tunnelUrl = tunnel.url || "";
+  if (startTunnelButton) startTunnelButton.hidden = tunnelRunning;
+  if (stopTunnelButton) stopTunnelButton.hidden = !tunnelRunning;
+  if (tunnelLink) {
+    tunnelLink.hidden = !tunnelUrl;
+    tunnelLink.href = tunnelUrl || "#";
+    tunnelLink.textContent = tunnelUrl || "Open tunnel";
+  }
+  if (runtimeMessage) {
+    if (tunnelUrl) {
+      runtimeMessage.textContent = "Tunnel live.";
+    } else if (tunnelRunning) {
+      runtimeMessage.textContent = "Tunnel starting.";
+    } else {
+      runtimeMessage.textContent = "Tunnel off.";
+    }
+  }
+}
+
+function mlxStatusText(mlx) {
+  if (mlx.available) return "MLX ready";
+  if (mlx.managed) return "MLX starting";
+  return "MLX unavailable";
+}
+
+function setRuntimeBusy(busy) {
+  [runtimeOcr, startTunnelButton, stopTunnelButton].forEach((control) => {
+    if (control) control.disabled = busy;
+  });
+}
+
+async function updateOcrBackend(backend) {
+  setRuntimeBusy(true);
+  try {
+    const data = await requestJson("/api/runtime/ocr", {
+      method: "POST",
+      body: JSON.stringify({ backend }),
+    });
+    renderRuntime(data);
+  } catch (error) {
+    setError(error instanceof Error ? error.message : "Runtime update failed.");
+    await loadRuntime().catch(() => {});
+  } finally {
+    setRuntimeBusy(false);
+  }
+}
+
+async function startTunnel() {
+  setRuntimeBusy(true);
+  try {
+    const data = await requestJson("/api/runtime/tunnel/start", { method: "POST" });
+    renderRuntime(data);
+  } catch (error) {
+    setError(error instanceof Error ? error.message : "Tunnel start failed.");
+  } finally {
+    setRuntimeBusy(false);
+  }
+}
+
+async function stopTunnel() {
+  setRuntimeBusy(true);
+  try {
+    const data = await requestJson("/api/runtime/tunnel/stop", { method: "POST" });
+    renderRuntime(data);
+  } catch (error) {
+    setError(error instanceof Error ? error.message : "Tunnel stop failed.");
+  } finally {
+    setRuntimeBusy(false);
+  }
+}
+
 if (fileInput) {
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
@@ -211,10 +310,13 @@ function syncModeOptions() {
 conversionMode?.addEventListener("change", syncModeOptions);
 syncModeOptions();
 
-refreshButton?.addEventListener("click", () => loadJobs().catch((error) => setError(error.message)));
+runtimeOcr?.addEventListener("change", () => updateOcrBackend(runtimeOcr.value));
+startTunnelButton?.addEventListener("click", startTunnel);
+stopTunnelButton?.addEventListener("click", stopTunnel);
+refreshButton?.addEventListener("click", () => refreshAll().catch((error) => setError(error.message)));
 
-loadJobs().catch((error) => setError(error.message));
-polling = setInterval(() => loadJobs().catch(() => {}), 2500);
+refreshAll().catch((error) => setError(error.message));
+polling = setInterval(() => refreshAll().catch(() => {}), 2500);
 window.addEventListener("beforeunload", () => {
   if (polling) clearInterval(polling);
 });

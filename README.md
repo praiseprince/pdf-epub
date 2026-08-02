@@ -23,6 +23,7 @@ branch. This branch is local-first.
   PDF.
 - Comic/manga mode using KCC with Kobo KEPUB, plain EPUB, or CBZ output.
 - Download, cancel, retry, and delete controls for saved jobs.
+- Runtime controls for MLX vs CPU OCR and temporary Cloudflare tunnels.
 
 No Gemini, Baidu LLM, or other formula-repair LLM is used. OCR-provided LaTeX is
 validated by MathJax; if it renders, the app embeds a PNG formula image. If it
@@ -37,6 +38,10 @@ Comic jobs are also local-only after upload.
 `BAIDU_AI_STUDIO_API_KEY` is only needed if you explicitly switch
 `LOCAL_PADDLE_MODE=live` for cloud OCR fallback/debugging.
 
+Cloudflare quick tunnels are optional. When enabled, `cloudflared` proxies the
+PIN-protected local app to a temporary `trycloudflare.com` URL until you stop
+the tunnel or quit the app.
+
 ## Requirements
 
 - Python 3.11 or newer for the app.
@@ -44,6 +49,7 @@ Comic jobs are also local-only after upload.
 - Node.js 22 or newer and npm.
 - Poppler (`pdfinfo` and `pdftoppm`).
 - Java only if you want EPUBCheck validation.
+- Optional for phone/tablet access: `cloudflared`.
 - Optional for comic/manga mode: Kindle Comic Converter `kcc-c2e` or a local KCC
   source checkout.
 
@@ -79,6 +85,7 @@ For local OCR, create the isolated PaddleOCR environment with a supported Python
 .venv_paddleocr/bin/python -m pip install --upgrade pip setuptools wheel
 .venv_paddleocr/bin/python -m pip install paddlepaddle==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 .venv_paddleocr/bin/python -m pip install -U "paddleocr[doc-parser]"
+.venv_paddleocr/bin/python -m pip install "mlx-vlm>=0.3.11"
 ```
 
 The first local OCR run downloads official model files to your user cache, for
@@ -94,56 +101,58 @@ Run the app:
 
 ```sh
 . .venv/bin/activate
-npm run local:run
+npm run local:app
 ```
 
 Open `http://127.0.0.1:8000/login`.
 
-## Local Launchers
+On Apple Silicon, `npm run local:app` starts the MLX-VLM service by default.
+Use CPU mode when you want the slower fallback:
 
-For normal use, prefer the packaged launchers instead of remembering the raw
-uvicorn command:
+```sh
+npm run local:cpu
+```
+
+## Mac App Bundle
+
+Build the Finder app:
 
 ```sh
 . .venv/bin/activate
 npm run local:package
 ```
 
-This writes launchers under ignored `dist/`:
+This writes:
 
 ```text
 dist/PDF to EPUB.app
-dist/PDF to EPUB.command
-dist/PDF to EPUB MLX.command
-dist/PDF to EPUB Tunnel.command
-dist/PDF to EPUB Tunnel MLX.command
 ```
 
-Double-click a `.command` file to run in Terminal, or double-click
-`PDF to EPUB.app` to open Terminal and start the local server. Press `Ctrl-C` in
-that Terminal window to stop the app.
+Double-click `PDF to EPUB.app` to open Terminal and start the local server.
+Press `Ctrl-C` in that Terminal window to stop the app.
 
-Command equivalents:
+The app bundle copies the source, `.venv`, `.venv_paddleocr`, `node_modules`,
+and local `.env` files into:
 
-```sh
-npm run local:app       # local app only
-npm run local:mlx       # local app plus MLX Apple GPU VLM service
-npm run local:tunnel    # local app plus temporary Cloudflare URL
+```text
+dist/PDF to EPUB.app/Contents/Resources/pdf-epub
 ```
 
-The MLX mode uses Apple GPU acceleration for PaddleOCR-VL's VLM recognition
-stage through the `mlx-vlm` server. It still runs layout/PDF rendering locally,
-and it still stores jobs under `data/`. Install it in the PaddleOCR environment
-when you want that path:
+Generated jobs and outputs are stored outside the bundle, so app rebuilds do not
+wipe them:
 
-```sh
-.venv_paddleocr/bin/python -m pip install "mlx-vlm>=0.3.11"
+```text
+~/Library/Application Support/PDF to EPUB/data
 ```
 
-Cloudflare quick tunnels are for temporary sharing/testing. They proxy your
-local app to a random `trycloudflare.com` HTTPS URL while `cloudflared` is
-running. The PIN still protects the app, but do not share the URL casually if
-you are uploading private PDFs.
+This is one Finder-visible `.app`, but macOS app bundles are directories under
+the hood. It is portable on this Mac as long as Homebrew Python, Poppler,
+Node-compatible native libraries, `cloudflared`, and the model caches remain
+installed.
+
+The app's Runtime panel lets you switch between MLX and CPU OCR and start/stop a
+temporary Cloudflare tunnel. Start the tunnel from the local browser, then open
+the displayed URL on your phone or another laptop.
 
 ## Environment
 
@@ -156,6 +165,10 @@ LOCAL_PADDLE_MODE=local
 LOCAL_PADDLE_PYTHON=.venv_paddleocr/bin/python
 LOCAL_PADDLE_PIPELINE_VERSION=v1.6
 LOCAL_PADDLE_DEVICE=cpu
+LOCAL_PADDLE_VL_BACKEND=mlx-vlm-server
+LOCAL_PADDLE_VL_SERVER_URL=http://127.0.0.1:8111/
+LOCAL_START_MLX=true
+LOCAL_START_TUNNEL=false
 ```
 
 Useful defaults documented in `.env.example`:
@@ -165,6 +178,8 @@ LOCAL_DATA_DIR=data
 LOCAL_HOST=127.0.0.1
 LOCAL_PORT=8000
 LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6
+LOCAL_PADDLE_VL_API_MODEL_NAME=PaddlePaddle/PaddleOCR-VL-1.6
+LOCAL_PADDLE_VL_MAX_CONCURRENCY=4
 LOCAL_OCR_DPI=120
 LOCAL_INCLUDE_PAGE_SNAPSHOTS=true
 LOCAL_CREATE_KEPUB_DEFAULT=false
@@ -225,6 +240,11 @@ Document jobs:
 - Optional: `Also create Kobo KEPUB`.
 
 Document OCR always uses PaddleOCR-VL 1.6 and the internal auto path.
+
+Runtime controls:
+
+- OCR: MLX or CPU.
+- Tunnel: start, stop, and open the temporary Cloudflare URL.
 
 Comic jobs:
 

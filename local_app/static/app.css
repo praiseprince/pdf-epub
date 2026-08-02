@@ -88,6 +88,7 @@ select:focus-visible,
 
 .auth-panel,
 .upload-panel,
+.runtime-panel,
 .jobs-panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -188,7 +189,14 @@ select {
   padding: 22px clamp(16px, 5vw, 48px) 48px;
 }
 
+.control-stack {
+  align-content: start;
+  display: grid;
+  gap: 18px;
+}
+
 .upload-panel,
+.runtime-panel,
 .jobs-panel {
   padding: 18px;
 }
@@ -251,6 +259,60 @@ select {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 16px;
+}
+
+.runtime-grid {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 16px;
+}
+
+.runtime-state {
+  align-items: center;
+  background: #eef1ed;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 0.85rem;
+  font-weight: 800;
+  min-height: 46px;
+  min-width: 128px;
+  padding: 0 12px;
+}
+
+.runtime-warning {
+  color: var(--danger);
+}
+
+.runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.runtime-actions a {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 8px;
+  color: var(--accent-ink);
+  display: inline-flex;
+  font-weight: 700;
+  min-height: 44px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.runtime-message {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  margin: 12px 0 0;
 }
 
 .section-header {
@@ -371,7 +433,8 @@ th {
     grid-template-columns: 1fr;
   }
 
-  .parser-grid {
+  .parser-grid,
+  .runtime-grid {
     grid-template-columns: 1fr;
   }
 

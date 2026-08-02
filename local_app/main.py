@@ -23,6 +23,7 @@ from .database import JobStore, serialize_jobs
 from .parser_options import normalize_parser_model, normalize_parser_strategy
 from .paths import ensure_data_dirs, job_upload_dir
 from .pdf_tools import pdfinfo
+from .runtime import MlxServerManager, RuntimeErrorMessage, TunnelManager, ocr_backend, runtime_payload, set_ocr_backend
 from .security import clear_session_cookie, read_session, require_api_session, set_session_cookie, verify_pin
 from .worker import JobWorker, delete_job_files
 
@@ -36,13 +37,29 @@ async def lifespan(app: FastAPI):
     ensure_data_dirs(settings)
     store = JobStore(settings.database_path)
     worker = JobWorker(settings, store)
+    tunnel = TunnelManager(local_url=f"http://{settings.local_host}:{settings.local_port}")
+    mlx_server = MlxServerManager(settings=settings)
     app.state.settings = settings
     app.state.store = store
     app.state.worker = worker
+    app.state.tunnel = tunnel
+    app.state.mlx_server = mlx_server
+    if settings.local_start_mlx and ocr_backend(settings) == "mlx":
+        try:
+            mlx_server.start(wait_seconds=2)
+        except RuntimeErrorMessage as exc:
+            print(f"MLX startup skipped: {exc}", flush=True)
+    if settings.local_start_tunnel:
+        try:
+            tunnel.start(wait_seconds=20)
+        except RuntimeErrorMessage as exc:
+            print(f"Cloudflare tunnel startup skipped: {exc}", flush=True)
     await worker.start()
     try:
         yield
     finally:
+        tunnel.stop()
+        mlx_server.stop()
         await worker.stop()
 
 
@@ -60,6 +77,14 @@ def store_dep(request: Request) -> JobStore:
 
 def worker_dep(request: Request) -> JobWorker:
     return request.app.state.worker
+
+
+def tunnel_dep(request: Request) -> TunnelManager:
+    return request.app.state.tunnel
+
+
+def mlx_server_dep(request: Request) -> MlxServerManager:
+    return request.app.state.mlx_server
 
 
 def api_auth(request: Request, settings: Settings = Depends(settings_dep)) -> None:
@@ -135,6 +160,63 @@ async def list_jobs(
     store: JobStore = Depends(store_dep),
 ) -> dict[str, object]:
     return {"jobs": serialize_jobs(store.list_jobs())}
+
+
+@app.get("/api/runtime")
+async def runtime_status(
+    _: None = Depends(api_auth),
+    settings: Settings = Depends(settings_dep),
+    tunnel: TunnelManager = Depends(tunnel_dep),
+    mlx_server: MlxServerManager = Depends(mlx_server_dep),
+) -> dict[str, object]:
+    return runtime_payload(settings, tunnel, mlx_server)
+
+
+@app.post("/api/runtime/ocr")
+async def update_runtime_ocr(
+    payload: dict[str, str],
+    _: None = Depends(api_auth),
+    settings: Settings = Depends(settings_dep),
+    tunnel: TunnelManager = Depends(tunnel_dep),
+    mlx_server: MlxServerManager = Depends(mlx_server_dep),
+) -> dict[str, object]:
+    requested_backend = str(payload.get("backend") or "")
+    try:
+        backend = set_ocr_backend(settings, requested_backend)
+        if backend == "mlx":
+            mlx_server.start(wait_seconds=15)
+        else:
+            mlx_server.stop()
+    except RuntimeErrorMessage as exc:
+        if requested_backend == "mlx":
+            set_ocr_backend(settings, "cpu")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return runtime_payload(settings, tunnel, mlx_server)
+
+
+@app.post("/api/runtime/tunnel/start")
+async def start_runtime_tunnel(
+    _: None = Depends(api_auth),
+    settings: Settings = Depends(settings_dep),
+    tunnel: TunnelManager = Depends(tunnel_dep),
+    mlx_server: MlxServerManager = Depends(mlx_server_dep),
+) -> dict[str, object]:
+    try:
+        tunnel.start()
+    except RuntimeErrorMessage as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return runtime_payload(settings, tunnel, mlx_server)
+
+
+@app.post("/api/runtime/tunnel/stop")
+async def stop_runtime_tunnel(
+    _: None = Depends(api_auth),
+    settings: Settings = Depends(settings_dep),
+    tunnel: TunnelManager = Depends(tunnel_dep),
+    mlx_server: MlxServerManager = Depends(mlx_server_dep),
+) -> dict[str, object]:
+    tunnel.stop()
+    return runtime_payload(settings, tunnel, mlx_server)
 
 
 @app.get("/api/jobs/{job_id}")

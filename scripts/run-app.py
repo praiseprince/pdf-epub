@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -21,12 +22,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local PDF-to-EPUB app.")
     parser.add_argument("--host", default=os.environ.get("LOCAL_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("LOCAL_PORT", "8000")))
-    parser.add_argument("--tunnel", action="store_true", help="Expose the local app with a temporary Cloudflare URL.")
-    parser.add_argument("--mlx", action="store_true", help="Use the MLX-VLM Apple GPU service for PaddleOCR-VL.")
+    parser.add_argument("--tunnel", action="store_true", help="Start a temporary Cloudflare URL inside the app.")
+    backend = parser.add_mutually_exclusive_group()
+    backend.add_argument("--mlx", dest="mlx", action="store_true", default=None, help="Use the MLX-VLM Apple GPU service.")
+    backend.add_argument("--cpu", dest="mlx", action="store_false", help="Use CPU PaddleOCR-VL.")
     parser.add_argument("--mlx-port", type=int, default=8111)
     parser.add_argument("--no-open", action="store_true", help="Do not open a browser automatically.")
     parser.add_argument("--reload", action="store_true", help="Run uvicorn in reload mode for development.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.mlx is None:
+        args.mlx = _default_mlx()
+    return args
 
 
 def main() -> int:
@@ -38,9 +44,10 @@ def main() -> int:
     env["LOCAL_HOST"] = args.host
     env["LOCAL_PORT"] = str(args.port)
     env.setdefault("LOCAL_PADDLE_MODE", "local")
+    env["LOCAL_START_MLX"] = "true" if args.mlx else "false"
+    env["LOCAL_START_TUNNEL"] = "true" if args.tunnel else "false"
 
     processes: list[subprocess.Popen[str]] = []
-    public_url_holder: dict[str, str] = {}
 
     try:
         if args.mlx:
@@ -49,8 +56,10 @@ def main() -> int:
             env["LOCAL_PADDLE_VL_SERVER_URL"] = mlx_url
             env.setdefault("LOCAL_PADDLE_VL_API_MODEL_NAME", "PaddlePaddle/PaddleOCR-VL-1.6")
             env.setdefault("LOCAL_PADDLE_VL_MAX_CONCURRENCY", "4")
-            processes.append(_start_mlx_server(args.mlx_port, env))
             print(f"MLX-VLM server requested at {mlx_url}")
+        else:
+            env["LOCAL_PADDLE_VL_BACKEND"] = ""
+            env["LOCAL_PADDLE_VL_SERVER_URL"] = ""
 
         app_cmd = [
             sys.executable,
@@ -75,23 +84,7 @@ def main() -> int:
             print(f"Local app is starting at {local_url}/login")
 
         if args.tunnel:
-            tunnel_cmd = ["cloudflared", "tunnel", "--url", local_url]
-            tunnel_proc = _start_process("cloudflare", tunnel_cmd, env=env, url_holder=public_url_holder)
-            processes.append(tunnel_proc)
-            print("Waiting for Cloudflare quick tunnel URL...")
-            for _ in range(90):
-                if public_url_holder.get("url"):
-                    break
-                if tunnel_proc.poll() is not None:
-                    break
-                time.sleep(1)
-            public_url = public_url_holder.get("url")
-            if public_url:
-                print(f"Temporary Cloudflare URL: {public_url}")
-                if not args.no_open:
-                    webbrowser.open(public_url)
-            else:
-                print("Cloudflare tunnel did not print a URL yet. Watch the cloudflare log lines above.")
+            print("Cloudflare tunnel requested. Log in locally and open the Runtime panel for the URL.")
 
         print("Press Ctrl-C in this terminal to stop the app.")
         while any(proc.poll() is None for proc in processes):
@@ -140,21 +133,6 @@ def _paddle_python() -> Path:
     return path
 
 
-def _start_mlx_server(port: int, env: dict[str, str]) -> subprocess.Popen[str]:
-    cmd = [
-        str(_paddle_python()),
-        "-m",
-        "mlx_vlm.server",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-        "--log-level",
-        "INFO",
-    ]
-    return _start_process("mlx", cmd, env=env)
-
-
 def _start_process(
     name: str,
     cmd: list[str],
@@ -189,6 +167,10 @@ def _start_process(
     return proc
 
 
+def _default_mlx() -> bool:
+    return platform.system() == "Darwin" and platform.machine() in {"arm64", "aarch64"}
+
+
 def _wait_for_http(url: str, *, timeout: int) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -210,7 +192,7 @@ def _stop_processes(processes: list[subprocess.Popen[str]]) -> None:
         while proc.poll() is None and time.monotonic() < deadline:
             time.sleep(0.2)
         if proc.poll() is None:
-            proc.terminate()
+            proc.kill()
     for proc in reversed(processes):
         try:
             proc.wait(timeout=5)

@@ -18,53 +18,82 @@
     </header>
 
     <main class="workspace">
-      <section class="upload-panel">
-        <form id="upload-form">
-          <label class="drop-zone" for="pdf-file" id="drop-zone">
-            <input id="pdf-file" name="file" type="file" accept="application/pdf,.pdf" required>
-            <span class="drop-title">Choose PDF</span>
-            <span id="selected-file" class="drop-meta">Drop a file here or select one.</span>
-          </label>
-          <label class="mode-field">
-            Conversion type
-            <select id="conversion-mode" name="conversion_mode">
-              <option value="document" selected>Document / paper</option>
-              <option value="comic">Comic / manga</option>
-            </select>
-          </label>
-          <div id="document-options">
-            <label class="check-row">
-              <input name="create_kepub" type="checkbox" value="true" {% if create_kepub_default %}checked{% endif %}>
-              Also create Kobo KEPUB
+      <div class="control-stack">
+        <section class="upload-panel">
+          <form id="upload-form">
+            <label class="drop-zone" for="pdf-file" id="drop-zone">
+              <input id="pdf-file" name="file" type="file" accept="application/pdf,.pdf" required>
+              <span class="drop-title">Choose PDF</span>
+              <span id="selected-file" class="drop-meta">Drop a file here or select one.</span>
             </label>
-          </div>
-          <div id="comic-options" hidden>
-            <div class="metadata-grid parser-grid">
-              <label>
-                Output
-                <select id="comic-output-format" name="comic_output_format">
-                  <option value="kepub" selected>Kobo KEPUB</option>
-                  <option value="epub">Plain EPUB</option>
-                  <option value="cbz">CBZ archive</option>
-                </select>
-              </label>
-              <label>
-                Layout
-                <select id="comic-layout" name="comic_layout">
-                  <option value="manga">Manga, right-to-left</option>
-                  <option value="comic">Comic, left-to-right</option>
-                  <option value="webtoon" selected>Webtoon / long strip</option>
-                </select>
+            <label class="mode-field">
+              Conversion type
+              <select id="conversion-mode" name="conversion_mode">
+                <option value="document" selected>Document / paper</option>
+                <option value="comic">Comic / manga</option>
+              </select>
+            </label>
+            <div id="document-options">
+              <label class="check-row">
+                <input name="create_kepub" type="checkbox" value="true" {% if create_kepub_default %}checked{% endif %}>
+                Also create Kobo KEPUB
               </label>
             </div>
+            <div id="comic-options" hidden>
+              <div class="metadata-grid parser-grid">
+                <label>
+                  Output
+                  <select id="comic-output-format" name="comic_output_format">
+                    <option value="kepub" selected>Kobo KEPUB</option>
+                    <option value="epub">Plain EPUB</option>
+                    <option value="cbz">CBZ archive</option>
+                  </select>
+                </label>
+                <label>
+                  Layout
+                  <select id="comic-layout" name="comic_layout">
+                    <option value="manga">Manga, right-to-left</option>
+                    <option value="comic">Comic, left-to-right</option>
+                    <option value="webtoon" selected>Webtoon / long strip</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <button type="submit">Convert to EPUB</button>
+              <span class="limits">{{ max_pdf_size_mb }} MB / {{ max_pdf_pages }} pages · {{ paddle_mode }} parser</span>
+            </div>
+            <p id="upload-error" class="error" hidden></p>
+          </form>
+        </section>
+
+        <section class="runtime-panel">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Runtime</p>
+              <h2>Engine and tunnel</h2>
+            </div>
           </div>
-          <div class="form-row">
-            <button type="submit">Convert to EPUB</button>
-            <span class="limits">{{ max_pdf_size_mb }} MB / {{ max_pdf_pages }} pages · {{ paddle_mode }} parser</span>
+          <div class="runtime-grid">
+            <label>
+              OCR
+              <select id="runtime-ocr">
+                <option value="mlx">MLX</option>
+                <option value="cpu">CPU</option>
+              </select>
+            </label>
+            <div class="runtime-state">
+              <span id="runtime-ocr-state">Checking</span>
+            </div>
           </div>
-          <p id="upload-error" class="error" hidden></p>
-        </form>
-      </section>
+          <div class="runtime-actions">
+            <button id="start-tunnel" type="button">Start tunnel</button>
+            <button class="secondary" id="stop-tunnel" type="button" hidden>Stop tunnel</button>
+            <a id="tunnel-link" href="#" target="_blank" rel="noreferrer" hidden>Open tunnel</a>
+          </div>
+          <p id="runtime-message" class="runtime-message">Checking runtime.</p>
+        </section>
+      </div>
 
       <section class="jobs-panel">
         <div class="section-header">

@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     local_paddle_vl_server_url: str = Field("", alias="LOCAL_PADDLE_VL_SERVER_URL")
     local_paddle_vl_api_model_name: str = Field("PaddlePaddle/PaddleOCR-VL-1.6", alias="LOCAL_PADDLE_VL_API_MODEL_NAME")
     local_paddle_vl_max_concurrency: int = Field(4, alias="LOCAL_PADDLE_VL_MAX_CONCURRENCY")
+    local_start_mlx: bool = Field(False, alias="LOCAL_START_MLX")
+    local_start_tunnel: bool = Field(False, alias="LOCAL_START_TUNNEL")
     local_ocr_dpi: int = Field(120, alias="LOCAL_OCR_DPI")
 
     max_pdf_size_mb: int = Field(200, alias="MAX_PDF_SIZE_MB")
