@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import bcrypt
@@ -12,6 +13,7 @@ from .config import Settings
 
 
 COOKIE_NAME = "pdf_epub_local_session"
+MIN_LOCAL_PIN_LENGTH = 4
 SESSION_MAX_AGE_SECONDS = int(timedelta(days=30).total_seconds())
 
 
@@ -38,6 +40,22 @@ def verify_pin(pin: str, settings: Settings) -> bool:
     # Development fallback for manually supplied fixed tokens. The documented
     # setup path uses bcrypt hashes, but this keeps local experiments simple.
     return secrets.compare_digest(pin, settings.app_pin_hash)
+
+
+def hash_pin(pin: str) -> str:
+    return bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def write_local_secrets(path: Path, *, pin_hash: str, session_secret: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    preserved: list[str] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("APP_PIN_HASH=") or line.startswith("SESSION_SECRET="):
+                continue
+            preserved.append(line)
+    content = "\n".join([f"APP_PIN_HASH={pin_hash}", f"SESSION_SECRET={session_secret}", *preserved]).rstrip()
+    path.write_text(f"{content}\n", encoding="utf-8")
 
 
 def sign_session(settings: Settings) -> str:

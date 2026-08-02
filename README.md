@@ -32,8 +32,10 @@ does not render, the original TeX is kept visibly as source text.
 ## Privacy
 
 In normal `LOCAL_PADDLE_MODE=local` use, document OCR runs on your computer.
-Generated uploads, OCR JSON, page images, EPUBs, and logs stay under `data/`.
-Comic jobs are also local-only after upload.
+Generated uploads, OCR JSON, page images, EPUBs, and logs stay under the
+configured local data directory. In the packaged macOS app, that is
+`~/Library/Application Support/PDF to EPUB/data`. Comic jobs are also local-only
+after upload.
 
 `BAIDU_AI_STUDIO_API_KEY` is only needed if you explicitly switch
 `LOCAL_PADDLE_MODE=live` for cloud OCR fallback/debugging.
@@ -47,11 +49,14 @@ the tunnel or quit the app.
 - Python 3.11 or newer for the app.
 - Python 3.9-3.13 for the isolated local PaddleOCR environment.
 - Node.js 22 or newer and npm.
-- Poppler (`pdfinfo` and `pdftoppm`).
 - Java only if you want EPUBCheck validation.
 - Optional for phone/tablet access: `cloudflared`.
 - Optional for comic/manga mode: Kindle Comic Converter `kcc-c2e` or a local KCC
   source checkout.
+
+The packaged macOS build bundles the app Python runtime, the PaddleOCR Python
+runtime, Node.js, `cloudflared`, and KCC source. It does not bundle OCR model
+weights; the first OCR run downloads models into Application Support.
 
 PaddleOCR's docs describe local PaddleOCR-VL usage, Apple Silicon setup, and
 first-run model downloads:
@@ -88,8 +93,13 @@ For local OCR, create the isolated PaddleOCR environment with a supported Python
 .venv_paddleocr/bin/python -m pip install "mlx-vlm>=0.3.11"
 ```
 
-The first local OCR run downloads official model files to your user cache, for
-example `/Users/june/.paddlex/official_models/`.
+The first local OCR run downloads official model files. In raw development runs,
+PaddleOCR may use your normal user cache. In the packaged macOS app, cache
+environment variables point model downloads to:
+
+```text
+~/Library/Application Support/PDF to EPUB/models
+```
 
 For comic/manga conversion, install or clone KCC:
 
@@ -115,7 +125,7 @@ npm run local:cpu
 
 ## Mac App Bundle
 
-Build the Finder app:
+Build the downloadable macOS app and DMG:
 
 ```sh
 . .venv/bin/activate
@@ -126,16 +136,34 @@ This writes:
 
 ```text
 dist/PDF to EPUB.app
+dist/PDF-to-EPUB-mac-arm64.dmg
 ```
 
-Double-click `PDF to EPUB.app` to open Terminal and start the local server.
-Press `Ctrl-C` in that Terminal window to stop the app.
+Double-click `PDF to EPUB.app` to open a native WebView window. No Terminal
+window is opened. Closing the window hides it; the backend keeps running so OCR
+jobs can continue. Use the menu bar item named `PDF EPUB` to show the window,
+open the local app in your browser, or quit. Quitting stops the backend, MLX,
+and any managed Cloudflare tunnel.
 
-The app bundle copies the source, `.venv`, `.venv_paddleocr`, `node_modules`,
-and local `.env` files into:
+The public-safe package copies source, `.venv`, `.venv_paddleocr`,
+`node_modules`, bundled Python runtimes, bundled Node.js, bundled `cloudflared`,
+and bundled KCC source into:
 
 ```text
 dist/PDF to EPUB.app/Contents/Resources/pdf-epub
+```
+
+Private `.env` files are not bundled by default. On first launch, the app asks
+you to create a local PIN and writes its config here:
+
+```text
+~/Library/Application Support/PDF to EPUB/.env
+```
+
+For a private one-off build that includes your current `.env`, use:
+
+```sh
+npm run local:package:private
 ```
 
 Generated jobs and outputs are stored outside the bundle, so app rebuilds do not
@@ -146,13 +174,23 @@ wipe them:
 ```
 
 This is one Finder-visible `.app`, but macOS app bundles are directories under
-the hood. It is portable on this Mac as long as Homebrew Python, Poppler,
-Node-compatible native libraries, `cloudflared`, and the model caches remain
-installed.
+the hood. The DMG is the file to attach to a GitHub Release.
 
 The app's Runtime panel lets you switch between MLX and CPU OCR and start/stop a
 temporary Cloudflare tunnel. Start the tunnel from the local browser, then open
 the displayed URL on your phone or another laptop.
+
+## GitHub Release
+
+Do not commit the generated `.app` or `.dmg`. They are ignored because GitHub
+blocks regular repository files over 100 MiB and recommends Releases for large
+binaries. Attach the DMG as a release asset instead:
+
+```sh
+gh release create v0.3.0 dist/PDF-to-EPUB-mac-arm64.dmg \
+  --title "PDF to EPUB v0.3.0" \
+  --notes "Native macOS WebView app with bundled local runtime."
+```
 
 ## Environment
 
@@ -161,6 +199,7 @@ Typical private `.env`:
 ```sh
 APP_PIN_HASH=
 SESSION_SECRET=
+LOCAL_CONFIG_FILE=
 LOCAL_PADDLE_MODE=local
 LOCAL_PADDLE_PYTHON=.venv_paddleocr/bin/python
 LOCAL_PADDLE_PIPELINE_VERSION=v1.6
@@ -175,6 +214,9 @@ Useful defaults documented in `.env.example`:
 
 ```sh
 LOCAL_DATA_DIR=data
+PADDLE_PDX_CACHE_HOME=data/models/paddlex
+HF_HOME=data/models/huggingface
+HUGGINGFACE_HUB_CACHE=data/models/huggingface/hub
 LOCAL_HOST=127.0.0.1
 LOCAL_PORT=8000
 LOCAL_PADDLE_MODEL=PaddleOCR-VL-1.6

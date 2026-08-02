@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
 
     app_pin_hash: str = Field("", alias="APP_PIN_HASH")
     session_secret: str = Field("", alias="SESSION_SECRET")
+    local_config_file: Path | None = Field(None, alias="LOCAL_CONFIG_FILE")
     baidu_ai_studio_api_key: str = Field(
         "",
         validation_alias=AliasChoices("BAIDU_AI_STUDIO_API_KEY", "PADDLEOCR_ACCESS_TOKEN"),
@@ -83,6 +85,12 @@ class Settings(BaseSettings):
         return self.data_dir / "app.db"
 
     @property
+    def writable_config_path(self) -> Path:
+        if self.local_config_file is not None:
+            return self.local_config_file.expanduser().resolve()
+        return Path(".env").resolve()
+
+    @property
     def max_pdf_size_bytes(self) -> int:
         return self.max_pdf_size_mb * 1024 * 1024
 
@@ -101,4 +109,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    env_files: list[str | Path] = [".env", ".env.local"]
+    if config_file := os.environ.get("LOCAL_CONFIG_FILE"):
+        env_files.append(Path(config_file).expanduser())
+    return Settings(_env_file=tuple(env_files))

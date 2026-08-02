@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,7 +25,16 @@ from .parser_options import normalize_parser_model, normalize_parser_strategy
 from .paths import ensure_data_dirs, job_upload_dir
 from .pdf_tools import pdfinfo
 from .runtime import MlxServerManager, RuntimeErrorMessage, TunnelManager, ocr_backend, runtime_payload, set_ocr_backend
-from .security import clear_session_cookie, read_session, require_api_session, set_session_cookie, verify_pin
+from .security import (
+    MIN_LOCAL_PIN_LENGTH,
+    clear_session_cookie,
+    hash_pin,
+    read_session,
+    require_api_session,
+    set_session_cookie,
+    verify_pin,
+    write_local_secrets,
+)
 from .worker import JobWorker, delete_job_files
 
 
@@ -123,6 +133,45 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    response = RedirectResponse("/convert", status_code=status.HTTP_303_SEE_OTHER)
+    set_session_cookie(response, settings)
+    return response
+
+
+@app.post("/setup")
+async def setup_pin(
+    request: Request,
+    pin: str = Form(...),
+    confirm_pin: str = Form(...),
+    settings: Settings = Depends(settings_dep),
+) -> Response:
+    if settings.app_pin_hash and settings.session_secret:
+        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    if len(pin) < MIN_LOCAL_PIN_LENGTH:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "missing_config": True,
+                "error": f"Use at least {MIN_LOCAL_PIN_LENGTH} digits or characters.",
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if pin != confirm_pin:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"missing_config": True, "error": "PINs do not match."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    settings.app_pin_hash = hash_pin(pin)
+    settings.session_secret = secrets.token_urlsafe(32)
+    write_local_secrets(
+        settings.writable_config_path,
+        pin_hash=settings.app_pin_hash,
+        session_secret=settings.session_secret,
+    )
     response = RedirectResponse("/convert", status_code=status.HTTP_303_SEE_OTHER)
     set_session_cookie(response, settings)
     return response

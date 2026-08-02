@@ -97,14 +97,20 @@ def main() -> int:
 
 
 def _preflight(args: argparse.Namespace) -> None:
-    if not (ROOT / ".env").exists() and not (ROOT / ".env.local").exists():
+    local_config = os.environ.get("LOCAL_CONFIG_FILE", "")
+    has_config = (
+        (ROOT / ".env").exists()
+        or (ROOT / ".env.local").exists()
+        or (local_config and Path(local_config).expanduser().exists())
+    )
+    if not has_config:
         raise SystemExit("Create .env first. Use .env.example as the template.")
     if not (ROOT / ".venv").exists():
         raise SystemExit("Missing .venv. Run the README setup first.")
     if not (ROOT / "node_modules").exists():
         raise SystemExit("Missing node_modules. Run npm install first.")
-    if not shutil.which("pdfinfo") or not shutil.which("pdftoppm"):
-        raise SystemExit("Missing Poppler tools. Install poppler first.")
+    if not shutil.which("node"):
+        raise SystemExit("Missing Node.js runtime. Use the packaged app or install Node.js 22+.")
     if args.tunnel and not shutil.which("cloudflared"):
         raise SystemExit("Missing cloudflared. Install it with: brew install cloudflared")
     if args.mlx:

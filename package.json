@@ -1,6 +1,6 @@
 {
   "name": "private-pdf-to-epub",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "local:mlx": "python3 scripts/run-app.py --mlx",
     "local:cpu": "python3 scripts/run-app.py --cpu",
     "local:package": "python3 scripts/package-local.py",
+    "local:package:private": "python3 scripts/package-local.py --include-private-env",
     "local:smoke": "python3 scripts/smoke-local.py",
     "testset:download": "python3 scripts/download-testset.py",
     "python:test": "pytest",
